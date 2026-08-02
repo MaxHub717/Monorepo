@@ -1,0 +1,178 @@
+name: nexgen-dev
+
+services:
+  db:
+    env_file:
+      - ../.env.docker
+    environment:
+      POSTGRES_DB: nexgen_esport
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data-dev:/var/lib/postgresql/data
+    networks:
+      - nexgen
+    
+
+  redis:
+    volumes:
+      - redis-data-dev:/data
+    networks:
+      - nexgen
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: dev
+      args:
+        NODE_VERSION: "20-bookworm-slim"
+        PNPM_VERSION: "9.15.0"
+
+    env_file:
+      - ../.env.docker
+
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/nexgen_esport
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_API_BASE_URL: http://api:3000/api/v1
+      DB_HOST: db
+      DB_PORT: 5432
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      RUN_MIGRATIONS: "false"
+
+    working_dir: /workspace
+
+    ports:
+      - "3000:3000"
+
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    volumes:
+      - ../apps:/workspace/apps
+      - ../packages:/workspace/packages
+      - ../package.json:/workspace/package.json
+      - ../pnpm-lock.yaml:/workspace/pnpm-lock.yaml
+      - ../pnpm-workspace.yaml:/workspace/pnpm-workspace.yaml
+      - ../tsconfig.base.json:/workspace/tsconfig.base.json
+
+      - api-node-modules:/workspace/apps/api/node_modules
+      - root-node-modules:/workspace/node_modules
+      - pnpm-store-dev:/pnpm/store
+
+    entrypoint:
+      - /usr/local/bin/entrypoint.api.sh
+
+    command:
+      - pnpm
+      - --filter
+      - "@nexgen/api"
+      - dev
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:3000/api/v1/health || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+
+    networks:
+      - nexgen
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      target: dev
+      args:
+        NODE_VERSION: "20-bookworm-slim"
+        PNPM_VERSION: "9.15.0"
+
+    env_file:
+      - ../.env.docker
+
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      NEXT_PUBLIC_API_BASE_URL: http://api:3000/api/v1
+      API_HOST: api
+      API_PORT: 3000
+
+    working_dir: /workspace
+
+    ports:
+      - "3001:3000"
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    volumes:
+      - ../apps:/workspace/apps
+      - ../packages:/workspace/packages
+      - ../package.json:/workspace/package.json
+      - ../pnpm-lock.yaml:/workspace/pnpm-lock.yaml
+      - ../pnpm-workspace.yaml:/workspace/pnpm-workspace.yaml
+      - ../tsconfig.base.json:/workspace/tsconfig.base.json
+
+      - web-node-modules:/workspace/apps/web/node_modules
+      - root-node-modules:/workspace/node_modules
+      - pnpm-store-dev:/pnpm/store
+
+    entrypoint:
+      - /usr/local/bin/entrypoint.web.sh
+
+    command:
+      - pnpm
+      - --filter
+      - "@nexgen/web"
+      - dev
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:3000 || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+
+    networks:
+      - nexgen
+
+  adminer:
+    image: adminer:4.8.1
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    networks:
+      - nexgen
+
+volumes:
+  postgres-data-dev:
+  redis-data-dev:
+
+  root-node-modules:
+  api-node-modules:
+  web-node-modules:
+
+  pnpm-store-dev:

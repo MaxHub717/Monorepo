@@ -1,0 +1,107 @@
+
+ARG NODE_VERSION=20-bookworm-slim
+
+########################################################
+# Base
+########################################################
+FROM node:${NODE_VERSION} AS base
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+RUN corepack enable
+
+WORKDIR /workspace
+
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    openssl \
+    curl \
+    netcat-openbsd \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+########################################################
+# Dependencies
+########################################################
+FROM base AS deps
+
+COPY package.json .
+COPY pnpm-lock.yaml .
+COPY pnpm-workspace.yaml .
+COPY tsconfig.base.json .
+
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
+
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+########################################################
+# Builder
+########################################################
+FROM deps AS builder
+
+COPY . .
+
+RUN pnpm --filter @nexgen/shared build
+
+RUN pnpm --filter @nexgen/web build
+
+########################################################
+# Development
+########################################################
+FROM deps AS dev
+
+ENV NODE_ENV=development
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["pnpm","--filter","@nexgen/web","dev"]
+
+########################################################
+# Runtime
+########################################################
+FROM node:${NODE_VERSION} AS runtime
+
+ENV NODE_ENV=production
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+RUN corepack enable
+
+WORKDIR /workspace
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    openssl \
+    curl \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=deps /workspace/node_modules ./node_modules
+
+COPY --from=builder /workspace/apps/web/.next ./apps/web/.next
+COPY --from=builder /workspace/apps/web/app ./apps/web/app
+COPY --from=builder /workspace/apps/web/package.json ./apps/web/package.json
+COPY --from=builder /workspace/apps/web/next.config.js ./apps/web/next.config.js
+
+COPY --from=builder /workspace/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /workspace/packages/shared/package.json ./packages/shared/package.json
+
+COPY docker/entrypoint-web.sh /usr/local/bin/entrypoint-web.sh
+
+RUN chmod +x /usr/local/bin/entrypoint-web.sh
+
+WORKDIR /app/apps/web
+
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-web.sh"]
+
+CMD ["pnpm","start"]
