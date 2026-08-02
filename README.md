@@ -72,11 +72,6 @@ curl -i http://localhost:3000/api/v1/health
 ```
 
 4. Access the database admin interface at `http://localhost:8080` using:
-- System: PostgreSQL
-- Server: `db`
-- Username: `postgres`
-- Password: `postgres`
-- Database: `nexgen_esport`
 
 5. Stop the stack:
 
