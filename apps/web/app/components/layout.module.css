@@ -1,0 +1,81 @@
+.pageWrapper {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.pageContent {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.appShell {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.layoutMain {
+  padding: 24px;
+}
+
+.navLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.homeIntro {
+  max-width: 780px;
+  line-height: 1.8;
+}
+
+.dashboardCards {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.cardGrid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.card {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 9999px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.statusBadge {
+  display: inline-flex;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #111827;
+  font-size: 0.85rem;
+}

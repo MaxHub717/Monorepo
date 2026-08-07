@@ -1,0 +1,40 @@
+name: nexgen-test
+# Load this file together with docker/compose.base.yml:
+# docker compose -f docker/compose.base.yml -f docker/compose.test.yml up --build
+
+services:
+  db:
+    env_file:
+      - ../.env.docker
+    environment:
+      POSTGRES_DB: nexgen_esport_test
+    networks:
+      - nexgen
+
+  redis:
+    networks:
+      - nexgen
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: dev
+      args:
+        NODE_VERSION: "24.16.0"
+        PNPM_VERSION: "9.15.0"
+    env_file:
+      - ../.env.docker
+    environment:
+      NODE_ENV: test
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/nexgen_esport_test
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "pnpm --filter @nexgen/api test"
+    networks:
+      - nexgen

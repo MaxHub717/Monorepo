@@ -1,0 +1,690 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum RoleName {
+  PLAYER
+  CLUB_MANAGER
+  OPERATOR
+  COMMISSIONER
+  HQ_ADMIN
+}
+
+enum PermissionName {
+  MANAGE_USERS
+  MANAGE_ROLES
+  MANAGE_SEASONS
+  MANAGE_MATCHES
+  MANAGE_RESULTS
+  MANAGE_DISPUTES
+  MANAGE_PENALTIES
+  MANAGE_CLUBS
+  VIEW_AUDIT
+  VIEW_ADMIN_DASHBOARD
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationTokenPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum PlayerStatus {
+  REGISTERED
+  VERIFIED
+  FREE_AGENT
+  CLUB_MEMBER
+  SUSPENDED
+  BANNED
+  RETIRED
+  ARCHIVED
+}
+
+enum SeasonStatus {
+  DRAFT
+  REGISTRATION_OPEN
+  REGISTRATION_CLOSED
+  ROSTER_LOCKED
+  ACTIVE
+  PLAYOFFS
+  COMPLETED
+  ARCHIVED
+}
+
+enum DivisionType {
+  AMATEUR
+  COMPETITIVE
+  ELITE
+  VERIFIED_PRO
+}
+
+enum ClubStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  REJECTED
+  ARCHIVED
+}
+
+enum ClubApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  PENDING
+  INACTIVE
+  SUSPENDED
+}
+
+enum MemberRole {
+  MANAGER
+  COACH
+  PLAYER
+  SUPPORT
+}
+
+enum RewardType {
+  PARTICIPATION
+  VICTORY
+  MVP
+  FAIR_PLAY
+  SEASON_CHAMPION
+}
+
+enum AchievementType {
+  CLUB_JOINED
+  SEASON_CHAMPION
+  WIN_STREAK
+  MVP
+}
+
+enum MatchStatus {
+  DRAFT
+  SCHEDULED
+  CHECK_IN_OPEN
+  CHECK_IN_CLOSED
+  IN_PROGRESS
+  SUBMISSION_PENDING
+  UNDER_REVIEW
+  CONFIRMED
+  DISPUTED
+  FORFEITED
+  VOID
+  ARCHIVED
+}
+
+enum DisputeStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  ESCALATED
+  RESOLVED
+  REJECTED
+  CLOSED
+}
+
+enum PenaltyType {
+  WARNING
+  FORFEIT
+  POINT_DEDUCTION
+  SUSPENSION
+  BAN
+}
+
+enum PenaltyStatus {
+  PROPOSED
+  UNDER_REVIEW
+  APPROVED
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  username           String    @unique
+  password_hash      String
+  account_status     AccountStatus @default(PENDING)
+  email_verified_at  DateTime? @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @updatedAt @db.Timestamptz(6)
+  deleted_at         DateTime? @db.Timestamptz(6)
+
+  player_profile     PlayerProfile?
+  operator_profile   OperatorProfile?
+  user_roles         UserRole[]
+  sessions           Session[]
+  verification_tokens VerificationToken[]
+  login_attempts     LoginAttempt[]
+  club_applications  ClubApplication[]
+  club_members       ClubMember[]
+  disputes           Dispute[]
+  penalties          Penalty[]
+  rewards            Reward[]
+  achievements       Achievement[]
+  notifications      Notification[]
+  audit_logs         AuditLog[]
+  outbox_events      OutboxEvent[]
+
+  @@map("users")
+}
+
+model PlayerProfile {
+  id                 String          @id @default(uuid()) @db.Uuid
+  user_id            String          @unique @db.Uuid
+  gamer_tag          String          @unique
+  region             String?
+  verification_status VerificationStatus @default(UNVERIFIED)
+  player_status      PlayerStatus    @default(REGISTERED)
+  reputation_score   Int             @default(100)
+  wins               Int             @default(0)
+  losses             Int             @default(0)
+  draws              Int             @default(0)
+  goals              Int             @default(0)
+  no_shows           Int             @default(0)
+  mvp_count          Int             @default(0)
+  classification     DivisionType    @default(AMATEUR)
+  metadata_json      Json?
+  created_at         DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(6)
+  deleted_at         DateTime?       @db.Timestamptz(6)
+
+  user               User            @relation(fields: [user_id], references: [id])
+
+  @@map("player_profiles")
+}
+
+model OperatorProfile {
+  id                   String    @id @default(uuid()) @db.Uuid
+  user_id              String    @unique @db.Uuid
+  assigned_division_id String?   @db.Uuid
+  region               String?
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @updatedAt @db.Timestamptz(6)
+
+  user                 User      @relation(fields: [user_id], references: [id])
+
+  @@map("operator_profiles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        PermissionName @unique
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        RoleName @unique
+  description String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user_roles  UserRole[]
+  role_permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  role_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+  role Role @relation(fields: [role_id], references: [id])
+
+  @@unique([user_id, role_id])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id            String   @id @default(uuid()) @db.Uuid
+  role_id       String   @db.Uuid
+  permission_id String   @db.Uuid
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  role Role @relation(fields: [role_id], references: [id])
+  permission Permission @relation(fields: [permission_id], references: [id])
+
+  @@unique([role_id, permission_id])
+  @@map("role_permissions")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  user_id      String   @db.Uuid
+  refresh_hash String
+  revoked_at   DateTime? @db.Timestamptz(6)
+  expires_at   DateTime @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  id          String                    @id @default(uuid()) @db.Uuid
+  user_id     String                    @db.Uuid
+  purpose     VerificationTokenPurpose
+  token_hash  String
+  expires_at  DateTime                 @db.Timestamptz(6)
+  consumed_at DateTime?                @db.Timestamptz(6)
+  created_at  DateTime                 @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("verification_tokens")
+}
+
+model LoginAttempt {
+  id           String   @id @default(uuid()) @db.Uuid
+  user_id      String   @db.Uuid
+  attempts     Int      @default(0)
+  locked_until DateTime?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@unique([user_id])
+  @@map("login_attempts")
+}
+
+model OutboxEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  event_name       String
+  aggregate_type   String
+  aggregate_id     String
+  version          Int      @default(1)
+  actor_id         String?  @db.Uuid
+  actor_role       String?
+  correlation_id   String?
+  causation_id     String?
+  reason           String?
+  metadata         Json?
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  published_at     DateTime? @db.Timestamptz(6)
+  status           String   @default("PENDING")
+  retries          Int      @default(0)
+
+  actor User? @relation(fields: [actor_id], references: [id])
+
+  @@map("outbox_events")
+}
+
+model AuditLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  entity_type      String
+  entity_id        String
+  actor_id         String?  @db.Uuid
+  actor_role       String?
+  action           String
+  action_source    String?
+  reason           String?
+  before_state     Json?
+  after_state      Json?
+  request_id       String?
+  correlation_id   String?
+  metadata         Json?
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actor_id], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Club {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        String      @unique
+  tag         String      @unique
+  description String?
+  region      String?
+  status      ClubStatus  @default(PENDING_APPROVAL)
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(6)
+  deleted_at  DateTime?   @db.Timestamptz(6)
+
+  applications ClubApplication[]
+  members      ClubMember[]
+  home_fixtures Fixture[]   @relation("clubHomeFixtures")
+  away_fixtures Fixture[]   @relation("clubAwayFixtures")
+  participants MatchParticipant[]
+  standings_rows StandingsRow[]
+  rewards      Reward[]
+  penalties    Penalty[]
+  disputes     Dispute[]
+  match_results MatchResult[]
+
+  @@map("clubs")
+}
+
+model ClubApplication {
+  id           String                 @id @default(uuid()) @db.Uuid
+  club_id      String?                @db.Uuid
+  user_id      String?                @db.Uuid
+  season_id    String?                @db.Uuid
+  status       ClubApplicationStatus  @default(PENDING)
+  note         String?
+  submitted_at DateTime               @default(now()) @db.Timestamptz(6)
+  reviewed_at  DateTime?              @db.Timestamptz(6)
+  created_at   DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime               @updatedAt @db.Timestamptz(6)
+
+  club   Club?   @relation(fields: [club_id], references: [id])
+  user   User?   @relation(fields: [user_id], references: [id])
+  season Season? @relation(fields: [season_id], references: [id])
+
+  @@map("club_applications")
+}
+
+model ClubMember {
+  id         String           @id @default(uuid()) @db.Uuid
+  club_id    String           @db.Uuid
+  user_id    String           @db.Uuid
+  role       MemberRole       @default(PLAYER)
+  status     MembershipStatus @default(ACTIVE)
+  joined_at  DateTime         @default(now()) @db.Timestamptz(6)
+  left_at    DateTime?        @db.Timestamptz(6)
+  created_at DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at DateTime         @updatedAt @db.Timestamptz(6)
+
+  club Club @relation(fields: [club_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
+
+  @@unique([club_id, user_id])
+  @@map("club_members")
+}
+
+model Season {
+  id                   String       @id @default(uuid()) @db.Uuid
+  name                 String       @unique
+  description          String?
+  status               SeasonStatus @default(DRAFT)
+  start_date           DateTime?
+  end_date             DateTime?
+  registration_open_at DateTime?
+  registration_close_at DateTime?
+  created_at           DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime     @updatedAt @db.Timestamptz(6)
+  deleted_at           DateTime?    @db.Timestamptz(6)
+
+  divisions         Division[]
+  match_weeks       MatchWeek[]
+  standings_rows    StandingsRow[]
+  club_applications ClubApplication[]
+  rewards           Reward[]
+  matches           Match[]
+
+  @@map("seasons")
+}
+
+model Division {
+  id          String       @id @default(uuid()) @db.Uuid
+  season_id   String       @db.Uuid
+  name        String
+  type        DivisionType @default(AMATEUR)
+  description String?
+  capacity    Int          @default(10)
+  active      Boolean      @default(true)
+  created_at  DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime     @updatedAt @db.Timestamptz(6)
+
+  season        Season       @relation(fields: [season_id], references: [id])
+  match_weeks   MatchWeek[]
+  fixtures      Fixture[]
+  standings_rows StandingsRow[]
+  matches       Match[]
+
+  @@unique([season_id, name])
+  @@map("divisions")
+}
+
+model MatchWeek {
+  id           String     @id @default(uuid()) @db.Uuid
+  season_id    String     @db.Uuid
+  division_id  String     @db.Uuid
+  week_number  Int
+  start_date   DateTime?
+  end_date     DateTime?
+  created_at   DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime   @updatedAt @db.Timestamptz(6)
+
+  season   Season   @relation(fields: [season_id], references: [id])
+  division Division @relation(fields: [division_id], references: [id])
+  fixtures Fixture[]
+
+  @@unique([season_id, division_id, week_number])
+  @@map("match_weeks")
+}
+
+model Fixture {
+  id            String      @id @default(uuid()) @db.Uuid
+  division_id   String      @db.Uuid
+  match_week_id String?     @db.Uuid
+  home_club_id  String      @db.Uuid
+  away_club_id  String      @db.Uuid
+  scheduled_at  DateTime?
+  status        MatchStatus @default(SCHEDULED)
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime    @updatedAt @db.Timestamptz(6)
+
+  division  Division  @relation(fields: [division_id], references: [id])
+  match_week MatchWeek? @relation(fields: [match_week_id], references: [id])
+  home_club Club @relation("clubHomeFixtures", fields: [home_club_id], references: [id])
+  away_club Club @relation("clubAwayFixtures", fields: [away_club_id], references: [id])
+  match     Match?
+
+  @@map("fixtures")
+}
+
+model Match {
+  id           String     @id @default(uuid()) @db.Uuid
+  fixture_id   String     @unique @db.Uuid
+  season_id    String     @db.Uuid
+  division_id  String     @db.Uuid
+  status       MatchStatus @default(DRAFT)
+  started_at   DateTime?
+  ended_at     DateTime?
+  created_at   DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime   @updatedAt @db.Timestamptz(6)
+
+  fixture      Fixture      @relation(fields: [fixture_id], references: [id])
+  season       Season       @relation(fields: [season_id], references: [id])
+  division     Division     @relation(fields: [division_id], references: [id])
+  participants MatchParticipant[]
+  result       MatchResult?
+  disputes     Dispute[]
+  penalties    Penalty[]
+
+  @@map("matches")
+}
+
+model MatchParticipant {
+  id         String   @id @default(uuid()) @db.Uuid
+  match_id   String   @db.Uuid
+  club_id    String   @db.Uuid
+  role       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+
+  match Match @relation(fields: [match_id], references: [id])
+  club  Club  @relation(fields: [club_id], references: [id])
+
+  @@map("match_participants")
+}
+
+model MatchResult {
+  id             String   @id @default(uuid()) @db.Uuid
+  match_id       String   @unique @db.Uuid
+  home_score     Int      @default(0)
+  away_score     Int      @default(0)
+  winner_club_id String?  @db.Uuid
+  submitted_at   DateTime @default(now()) @db.Timestamptz(6)
+  confirmed_at   DateTime?
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @updatedAt @db.Timestamptz(6)
+
+  match      Match  @relation(fields: [match_id], references: [id])
+  winner_club Club? @relation(fields: [winner_club_id], references: [id])
+
+  @@map("match_results")
+}
+
+model Dispute {
+  id           String        @id @default(uuid()) @db.Uuid
+  match_id     String        @db.Uuid
+  club_id      String?       @db.Uuid
+  user_id      String?       @db.Uuid
+  issue        String
+  status       DisputeStatus @default(SUBMITTED)
+  resolution   String?
+  created_at   DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime      @updatedAt @db.Timestamptz(6)
+  resolved_at  DateTime?
+
+  match Match @relation(fields: [match_id], references: [id])
+  club  Club?  @relation(fields: [club_id], references: [id])
+  user  User?  @relation(fields: [user_id], references: [id])
+  penalties Penalty[]
+
+  @@map("disputes")
+}
+
+model Penalty {
+  id          String         @id @default(uuid()) @db.Uuid
+  match_id    String?        @db.Uuid
+  club_id     String?        @db.Uuid
+  user_id     String?        @db.Uuid
+  dispute_id  String?        @db.Uuid
+  type        PenaltyType    @default(WARNING)
+  status      PenaltyStatus  @default(PROPOSED)
+  reason      String?
+  issued_at   DateTime       @default(now()) @db.Timestamptz(6)
+  expires_at  DateTime?      @db.Timestamptz(6)
+  created_at  DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime       @updatedAt @db.Timestamptz(6)
+
+  match   Match?   @relation(fields: [match_id], references: [id])
+  club    Club?    @relation(fields: [club_id], references: [id])
+  user    User?    @relation(fields: [user_id], references: [id])
+  dispute Dispute? @relation(fields: [dispute_id], references: [id])
+
+  @@map("penalties")
+}
+
+model StandingsRow {
+  id            String   @id @default(uuid()) @db.Uuid
+  season_id     String   @db.Uuid
+  division_id   String   @db.Uuid
+  club_id       String   @db.Uuid
+  games_played  Int      @default(0)
+  wins          Int      @default(0)
+  draws         Int      @default(0)
+  losses        Int      @default(0)
+  goals_for     Int      @default(0)
+  goals_against Int      @default(0)
+  points        Int      @default(0)
+  ranking       Int      @default(0)
+  updated_at    DateTime @updatedAt @db.Timestamptz(6)
+
+  season   Season   @relation(fields: [season_id], references: [id])
+  division Division @relation(fields: [division_id], references: [id])
+  club     Club     @relation(fields: [club_id], references: [id])
+
+  @@unique([season_id, division_id, club_id])
+  @@map("standings_rows")
+}
+
+model Reward {
+  id          String     @id @default(uuid()) @db.Uuid
+  user_id     String?    @db.Uuid
+  club_id     String?    @db.Uuid
+  season_id   String?    @db.Uuid
+  type        RewardType
+  title       String
+  description String?
+  awarded_at  DateTime   @default(now()) @db.Timestamptz(6)
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime   @updatedAt @db.Timestamptz(6)
+
+  user User? @relation(fields: [user_id], references: [id])
+  club Club? @relation(fields: [club_id], references: [id])
+  season Season? @relation(fields: [season_id], references: [id])
+
+  @@map("rewards")
+}
+
+model Achievement {
+  id            String          @id @default(uuid()) @db.Uuid
+  user_id       String          @db.Uuid
+  type          AchievementType
+  title         String
+  description   String?
+  achieved_at   DateTime        @default(now()) @db.Timestamptz(6)
+  metadata      Json?
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime        @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("achievements")
+}
+
+model Notification {
+  id             String   @id @default(uuid()) @db.Uuid
+  user_id        String   @db.Uuid
+  title          String
+  message        String
+  category       String?
+  related_entity String?
+  read           Boolean  @default(false)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("notifications")
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  key            String   @unique
+  resource       String
+  request_hash   String
+  response_body  Json?
+  response_status Int?
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  expires_at     DateTime @db.Timestamptz(6)
+
+  @@map("idempotency_keys")
+}

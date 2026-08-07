@@ -1,0 +1,29 @@
+{
+  "name": "@nexgen/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --ext .ts,.tsx --report-unused-disable-directives --ignore-pattern 'node_modules/*' --ignore-pattern 'dist/*'",
+    "test": "vitest run --dir ."
+  },
+  "dependencies": {
+    "@nexgen/shared": "workspace:*",
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/react": "^18.3.3",
+    "@types/node": "^24.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.8.0",
+    "vitest": "^4.1.9"
+  }
+}

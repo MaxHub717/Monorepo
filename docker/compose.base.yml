@@ -1,0 +1,57 @@
+name: nexgen
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: nexgen_esport
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nexgen_esport"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - nexgen
+
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+    restart: unless-stopped
+
+    command:
+      - redis-server
+      - --appendonly
+      - yes
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+    volumes:
+      - redis-data:/data
+
+    networks:
+      - nexgen
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  nexgen:
