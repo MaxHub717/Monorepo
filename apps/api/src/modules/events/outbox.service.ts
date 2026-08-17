@@ -22,7 +22,8 @@ export class OutboxService {
   async enqueueEvent(
     tx: Prisma.TransactionClient,
     data: OutboxEventInput,
-  ) {
+  )
+  {
     return tx.outboxEvent.create({
       data: {
         event_name: data.eventName,

@@ -6,16 +6,9 @@ import { AdminUserController } from './admin.controller.js';
 import { AuthzModule } from '../../common/authz/authz.module.js';
 
 @Module({
-  imports: [
-      PrismaModule,
-      AuthzModule,
+  imports: [PrismaModule, AuthzModule,
   ],
-  controllers: [
-      UserController,
-      AdminUserController,
-  ],
-  providers: [
-      UserService,
-  ],
+  controllers: [UserController, AdminUserController],
+  providers: [UserService],
 })
 export class UserModule {}

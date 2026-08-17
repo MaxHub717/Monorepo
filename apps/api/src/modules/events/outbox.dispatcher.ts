@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -6,23 +8,30 @@ import { PrismaService } from '../prisma/prisma.service.js';
 @Injectable()
 export class OutboxDispatcher implements OnModuleInit {
   private readonly logger = new Logger(OutboxDispatcher.name);
-  private readonly pollIntervalMs = 5000;
+  private static readonly POLL_INTERVAL_MS = 5000;
   private readonly batchSize = 20;
   private readonly maxRetries = 5;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly eventEmitter: EventEmitter2,
-  ) {}
+ constructor(
+  private readonly prisma: PrismaService,
+  private readonly eventEmitter: EventEmitter2,
+) {
+  console.log('=== OUTBOX DISPATCHER CONSTRUCTOR ===');
+  console.log('ARGUMENT COUNT:', arguments.length);
+  console.log('ARGUMENT 0:', arguments[0]);
+  console.log('ARGUMENT 1:', arguments[1]);
+  console.log('this.prisma:', this.prisma);
+  console.log('this.eventEmitter:', this.eventEmitter);
+}
 
   onModuleInit() {
     void this.processPendingEvents();
   }
 
-  @Interval('outbox-dispatch', 5000)
-  async handleInterval() {
-    await this.processPendingEvents();
-  }
+ @Interval('outbox-dispatch', OutboxDispatcher.POLL_INTERVAL_MS)
+async handleInterval() {
+  await this.processPendingEvents();
+}
 
   private async processPendingEvents() {
     try {

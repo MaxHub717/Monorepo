@@ -5,9 +5,10 @@ import { PrismaModule } from '../prisma/prisma.module.js';
 import { EventModule } from '../events/event.module.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { MailerService, DevMailer } from './mailer.service.js';
+import { AuthzModule } from '../../common/authz/authz.module.js';
 
 @Module({
-  imports: [PrismaModule, EventModule, AuditModule],
+  imports: [PrismaModule, EventModule, AuditModule, AuthzModule],
   controllers: [AuthController],
   providers: [AuthService, { provide: MailerService, useClass: DevMailer }],
 })

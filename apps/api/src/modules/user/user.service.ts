@@ -6,16 +6,71 @@ export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { player_profile: true, user_roles: { include: { role: true } } } });
-    if (!user) throw new NotFoundException('User not found');
-    return user;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        account_status: true,
+        email_verified_at: true,
+        created_at: true,
+        updated_at: true,
+        player_profile: true,
+        user_roles: {
+          select: {
+            id: true,
+            role: {
+              select: {
+                id: true,
+                name: true,
+             },
+           },
+         },
+       },
+     },
+   });
+
+   if (!user) {
+    throw new NotFoundException('User not found');
+   }
+
+   return user;
   }
+  
 
   async getUser(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id }, include: { player_profile: true, user_roles: { include: { role: true } } } });
-    if (!user) throw new NotFoundException('User not found');
-    return user;
+  const user = await this.prisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      username: true,
+      account_status: true,
+      email_verified_at: true,
+      created_at: true,
+      updated_at: true,
+      player_profile: true,
+      user_roles: {
+        select: {
+          id: true,
+          role: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!user) {
+    throw new NotFoundException('User not found');
   }
+
+  return user;
+}
 
   async assignRole(userId: string, roleName: string) {
     const role = await this.prisma.role.findUnique({ where: { name: roleName as any } });
@@ -33,8 +88,30 @@ export class UserService {
   }
 
   async listUsersWithRoles() {
-    return this.prisma.user.findMany({ include: { user_roles: { include: { role: true } }, player_profile: true } });
-  }
+  return this.prisma.user.findMany({
+    select: {
+      id: true,
+      email: true,
+      username: true,
+      account_status: true,
+      email_verified_at: true,
+      created_at: true,
+      updated_at: true,
+      player_profile: true,
+      user_roles: {
+        select: {
+          id: true,
+          role: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+}
 
   async upsertOperatorProfile(userId: string, data: { assignedDivisionId?: string | null; region?: string | null }) {
     // create or update operator_profile for the user

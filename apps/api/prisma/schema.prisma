@@ -119,6 +119,17 @@ enum AchievementType {
   MVP
 }
 
+enum ParticipationStatus {
+  ACTIVE
+  WITHDRAWN
+  DISQUALIFIED
+}
+
+enum MatchParticipantRole {
+  HOME
+  AWAY
+}
+
 enum MatchStatus {
   DRAFT
   SCHEDULED
@@ -212,6 +223,14 @@ model PlayerProfile {
   deleted_at         DateTime?       @db.Timestamptz(6)
 
   user               User            @relation(fields: [user_id], references: [id])
+  division_participations DivisionParticipant[]
+  match_participants      MatchParticipant[]
+  home_fixtures           Fixture[]           @relation("playerHomeFixtures")
+  away_fixtures           Fixture[]           @relation("playerAwayFixtures")
+  standings_rows          StandingsRow[]
+  won_matches             MatchResult[]       @relation("winnerPlayer")
+  disputes                Dispute[]
+  penalties                Penalty[]
 
   @@map("player_profiles")
 }
@@ -383,7 +402,6 @@ model Club {
   rewards      Reward[]
   penalties    Penalty[]
   disputes     Dispute[]
-  match_results MatchResult[]
 
   @@map("clubs")
 }
@@ -434,16 +452,17 @@ model Season {
   end_date             DateTime?
   registration_open_at DateTime?
   registration_close_at DateTime?
-  created_at           DateTime     @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime     @updatedAt @db.Timestamptz(6)
-  deleted_at           DateTime?    @db.Timestamptz(6)
+  created_at            DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime     @updatedAt @db.Timestamptz(6)
+  deleted_at            DateTime?    @db.Timestamptz(6)
 
-  divisions         Division[]
-  match_weeks       MatchWeek[]
-  standings_rows    StandingsRow[]
-  club_applications ClubApplication[]
-  rewards           Reward[]
-  matches           Match[]
+  divisions           Division[]
+  match_weeks         MatchWeek[]
+  matches             Match[]
+  standings_rows      StandingsRow[]
+  participants        DivisionParticipant[]
+  club_applications   ClubApplication[]
+  rewards             Reward[]
 
   @@map("seasons")
 }
@@ -454,30 +473,53 @@ model Division {
   name        String
   type        DivisionType @default(AMATEUR)
   description String?
-  capacity    Int          @default(10)
+  capacity    Int?
   active      Boolean      @default(true)
   created_at  DateTime     @default(now()) @db.Timestamptz(6)
   updated_at  DateTime     @updatedAt @db.Timestamptz(6)
 
-  season        Season       @relation(fields: [season_id], references: [id])
-  match_weeks   MatchWeek[]
-  fixtures      Fixture[]
+  season         Season               @relation(fields: [season_id], references: [id])
+  participants   DivisionParticipant[]
+  match_weeks    MatchWeek[]
+  fixtures       Fixture[]
+  matches        Match[]
   standings_rows StandingsRow[]
-  matches       Match[]
 
   @@unique([season_id, name])
   @@map("divisions")
 }
 
+model DivisionParticipant {
+  id           String              @id @default(uuid()) @db.Uuid
+  season_id    String              @db.Uuid
+  division_id  String              @db.Uuid
+  player_id    String              @db.Uuid
+  status       ParticipationStatus @default(ACTIVE)
+  seed         Int?
+  registered_at DateTime           @default(now()) @db.Timestamptz(6)
+  withdrawn_at DateTime?
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @updatedAt @db.Timestamptz(6)
+
+  season   Season       @relation(fields: [season_id], references: [id])
+  division Division     @relation(fields: [division_id], references: [id])
+  player   PlayerProfile @relation(fields: [player_id], references: [id])
+
+  @@unique([season_id, player_id])
+  @@unique([division_id, seed])
+  @@index([season_id, player_id])
+  @@map("division_participants")
+}
+
 model MatchWeek {
-  id           String     @id @default(uuid()) @db.Uuid
-  season_id    String     @db.Uuid
-  division_id  String     @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  season_id    String   @db.Uuid
+  division_id  String   @db.Uuid
   week_number  Int
   start_date   DateTime?
   end_date     DateTime?
-  created_at   DateTime   @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime   @updatedAt @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @updatedAt @db.Timestamptz(6)
 
   season   Season   @relation(fields: [season_id], references: [id])
   division Division @relation(fields: [division_id], references: [id])
@@ -488,74 +530,78 @@ model MatchWeek {
 }
 
 model Fixture {
-  id            String      @id @default(uuid()) @db.Uuid
-  division_id   String      @db.Uuid
-  match_week_id String?     @db.Uuid
-  home_club_id  String      @db.Uuid
-  away_club_id  String      @db.Uuid
-  scheduled_at  DateTime?
-  status        MatchStatus @default(SCHEDULED)
-  created_at    DateTime    @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime    @updatedAt @db.Timestamptz(6)
+  id             String      @id @default(uuid()) @db.Uuid
+  division_id    String      @db.Uuid
+  match_week_id  String?     @db.Uuid
+  home_player_id String      @db.Uuid
+  away_player_id String      @db.Uuid
+  scheduled_at   DateTime?
+  status         MatchStatus @default(SCHEDULED)
+  created_at     DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(6)
 
-  division  Division  @relation(fields: [division_id], references: [id])
-  match_week MatchWeek? @relation(fields: [match_week_id], references: [id])
-  home_club Club @relation("clubHomeFixtures", fields: [home_club_id], references: [id])
-  away_club Club @relation("clubAwayFixtures", fields: [away_club_id], references: [id])
-  match     Match?
+  division    Division             @relation(fields: [division_id], references: [id])
+  match_week MatchWeek?            @relation(fields: [match_week_id], references: [id])
+  home_player PlayerProfile        @relation("playerHomeFixtures", fields: [home_player_id], references: [id])
+  away_player PlayerProfile        @relation("playerAwayFixtures", fields: [away_player_id], references: [id])
+  match       Match?
 
+  @@index([division_id, scheduled_at])
   @@map("fixtures")
 }
 
 model Match {
-  id           String     @id @default(uuid()) @db.Uuid
-  fixture_id   String     @unique @db.Uuid
-  season_id    String     @db.Uuid
-  division_id  String     @db.Uuid
+  id           String      @id @default(uuid()) @db.Uuid
+  fixture_id   String      @unique @db.Uuid
+  season_id    String      @db.Uuid
+  division_id  String      @db.Uuid
   status       MatchStatus @default(DRAFT)
   started_at   DateTime?
   ended_at     DateTime?
-  created_at   DateTime   @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime   @updatedAt @db.Timestamptz(6)
+  created_at   DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime    @updatedAt @db.Timestamptz(6)
 
-  fixture      Fixture      @relation(fields: [fixture_id], references: [id])
-  season       Season       @relation(fields: [season_id], references: [id])
-  division     Division     @relation(fields: [division_id], references: [id])
+  fixture      Fixture             @relation(fields: [fixture_id], references: [id])
+  season       Season              @relation(fields: [season_id], references: [id])
+  division     Division            @relation(fields: [division_id], references: [id])
   participants MatchParticipant[]
   result       MatchResult?
   disputes     Dispute[]
   penalties    Penalty[]
 
+  @@index([season_id, division_id, status])
   @@map("matches")
 }
 
 model MatchParticipant {
-  id         String   @id @default(uuid()) @db.Uuid
-  match_id   String   @db.Uuid
-  club_id    String   @db.Uuid
-  role       String
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  updated_at DateTime @updatedAt @db.Timestamptz(6)
+  id         String                @id @default(uuid()) @db.Uuid
+  match_id   String                @db.Uuid
+  player_id  String                @db.Uuid
+  role       MatchParticipantRole
+  created_at DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at DateTime              @updatedAt @db.Timestamptz(6)
 
-  match Match @relation(fields: [match_id], references: [id])
-  club  Club  @relation(fields: [club_id], references: [id])
+  match  Match        @relation(fields: [match_id], references: [id])
+  player PlayerProfile @relation(fields: [player_id], references: [id])
 
+  @@unique([match_id, player_id])
+  @@unique([match_id, role])
   @@map("match_participants")
 }
 
 model MatchResult {
-  id             String   @id @default(uuid()) @db.Uuid
-  match_id       String   @unique @db.Uuid
-  home_score     Int      @default(0)
-  away_score     Int      @default(0)
-  winner_club_id String?  @db.Uuid
-  submitted_at   DateTime @default(now()) @db.Timestamptz(6)
-  confirmed_at   DateTime?
-  created_at     DateTime @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime @updatedAt @db.Timestamptz(6)
+  id              String    @id @default(uuid()) @db.Uuid
+  match_id        String    @unique @db.Uuid
+  home_score      Int       @default(0)
+  away_score      Int       @default(0)
+  winner_player_id String?   @db.Uuid
+  submitted_at    DateTime  @default(now()) @db.Timestamptz(6)
+  confirmed_at    DateTime?
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @updatedAt @db.Timestamptz(6)
 
-  match      Match  @relation(fields: [match_id], references: [id])
-  winner_club Club? @relation(fields: [winner_club_id], references: [id])
+  match        Match         @relation(fields: [match_id], references: [id])
+  winner_player PlayerProfile? @relation("winnerPlayer", fields: [winner_player_id], references: [id])
 
   @@map("match_results")
 }
@@ -563,6 +609,7 @@ model MatchResult {
 model Dispute {
   id           String        @id @default(uuid()) @db.Uuid
   match_id     String        @db.Uuid
+  player_id    String?       @db.Uuid
   club_id      String?       @db.Uuid
   user_id      String?       @db.Uuid
   issue        String
@@ -572,17 +619,21 @@ model Dispute {
   updated_at   DateTime      @updatedAt @db.Timestamptz(6)
   resolved_at  DateTime?
 
-  match Match @relation(fields: [match_id], references: [id])
-  club  Club?  @relation(fields: [club_id], references: [id])
-  user  User?  @relation(fields: [user_id], references: [id])
+  match    Match          @relation(fields: [match_id], references: [id])
+  player   PlayerProfile? @relation(fields: [player_id], references: [id])
+  club     Club?    @relation(fields: [club_id], references: [id])
+  user     User?    @relation(fields: [user_id], references: [id])
   penalties Penalty[]
 
+  @@index([match_id, status])
+  @@index([player_id, status])
   @@map("disputes")
 }
 
 model Penalty {
   id          String         @id @default(uuid()) @db.Uuid
   match_id    String?        @db.Uuid
+  player_id   String?        @db.Uuid
   club_id     String?        @db.Uuid
   user_id     String?        @db.Uuid
   dispute_id  String?        @db.Uuid
@@ -590,15 +641,18 @@ model Penalty {
   status      PenaltyStatus  @default(PROPOSED)
   reason      String?
   issued_at   DateTime       @default(now()) @db.Timestamptz(6)
-  expires_at  DateTime?      @db.Timestamptz(6)
+  expires_at  DateTime?
   created_at  DateTime       @default(now()) @db.Timestamptz(6)
   updated_at  DateTime       @updatedAt @db.Timestamptz(6)
 
-  match   Match?   @relation(fields: [match_id], references: [id])
+  match   Match?         @relation(fields: [match_id], references: [id])
+  player  PlayerProfile? @relation(fields: [player_id], references: [id])
   club    Club?    @relation(fields: [club_id], references: [id])
   user    User?    @relation(fields: [user_id], references: [id])
   dispute Dispute? @relation(fields: [dispute_id], references: [id])
 
+  @@index([match_id, status])
+  @@index([player_id, status])
   @@map("penalties")
 }
 
@@ -606,7 +660,7 @@ model StandingsRow {
   id            String   @id @default(uuid()) @db.Uuid
   season_id     String   @db.Uuid
   division_id   String   @db.Uuid
-  club_id       String   @db.Uuid
+  player_id     String   @db.Uuid
   games_played  Int      @default(0)
   wins          Int      @default(0)
   draws         Int      @default(0)
@@ -617,11 +671,12 @@ model StandingsRow {
   ranking       Int      @default(0)
   updated_at    DateTime @updatedAt @db.Timestamptz(6)
 
-  season   Season   @relation(fields: [season_id], references: [id])
-  division Division @relation(fields: [division_id], references: [id])
-  club     Club     @relation(fields: [club_id], references: [id])
+  season   Season        @relation(fields: [season_id], references: [id])
+  division Division      @relation(fields: [division_id], references: [id])
+  player   PlayerProfile @relation(fields: [player_id], references: [id])
 
-  @@unique([season_id, division_id, club_id])
+  @@unique([season_id, division_id, player_id])
+  @@index([season_id, division_id, points])
   @@map("standings_rows")
 }
 
