@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards, Param, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, Param, Req, UnauthorizedException } from '@nestjs/common';
 import { PermissionName } from '../../common/authz/authz.types.js';
 import { RequirePermission, RequireOperatorScope } from '../../common/authz/authz.decorators.js';
 import { AuthGuard, AccountStatusGuard, PermissionsGuard, OperatorScopeGuard } from '../../common/authz/authz.guards.js';
 import { MatchService, CreateMatchDto, SubmitMatchResultDto } from './match.service.js';
 
 interface AuthRequest {
-  user?: { id?: string };
+  user?: { id?: string; roles?: string[] };
 }
 
 @Controller('matches')
@@ -31,10 +31,13 @@ export class MatchController {
     const actorId = req.user?.id;
 
     if (!actorId) {
-      throw new Error('Authenticated user identity is required to submit a match result');
+      throw new UnauthorizedException('Authenticated user identity is required to submit a match result');
     }
 
-    return this.matchService.submitMatchResult(dto, { id: actorId });
+    return this.matchService.submitMatchResult(dto, {
+      id: actorId,
+      roles: req.user?.roles ?? [],
+    });
   }
 
   @Post(':id/confirm')
