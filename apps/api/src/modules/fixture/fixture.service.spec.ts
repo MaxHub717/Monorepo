@@ -15,6 +15,25 @@ describe('buildRoundRobin', () => {
     expect(new Set(schedule.map((p) => p.round)).size).toBe(5);
   });
 
+  it('allows each player to appear in at most one match per round', () => {
+    const players = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const schedule = buildRoundRobin(players, 'ROUND_ROBIN_SINGLE' as any);
+    const rounds = new Map<number, string[]>();
+
+    for (const pairing of schedule) {
+      const participants = rounds.get(pairing.round) ?? [];
+      participants.push(pairing.homePlayerId, pairing.awayPlayerId);
+      rounds.set(pairing.round, participants);
+    }
+
+    expect(rounds.size).toBe(players.length - 1);
+
+    for (const participants of rounds.values()) {
+      expect(participants).toHaveLength(players.length);
+      expect(new Set(participants).size).toBe(players.length);
+    }
+  });
+
   it('creates a second reversed leg for double round robin', () => {
     const schedule = buildRoundRobin(['A', 'B', 'C', 'D'], 'ROUND_ROBIN_DOUBLE' as any);
     expect(schedule).toHaveLength(12);
