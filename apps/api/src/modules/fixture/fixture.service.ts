@@ -79,15 +79,7 @@ export class FixtureService {
       const pairings = buildRoundRobin(participants.map((p) => p.player_id), division.format);
       const rounds = Math.max(...pairings.map((p) => p.round));
 
-      for (let round = 1; round <= rounds; round += 1) {
-        await tx.matchWeek.create({
-          data: {
-            season_id: seasonId,
-            division_id: divisionId,
-            week_number: round,
-          },
-        });
-      }
+      await ensureMatchWeeks(tx, seasonId, divisionId, rounds);
 
       const weeks = await tx.matchWeek.findMany({
         where: { season_id: seasonId, division_id: divisionId },
@@ -156,6 +148,32 @@ export class FixtureService {
         roundCount: rounds,
         fixtureCount: pairings.length,
       };
+    });
+  }
+}
+
+
+export async function ensureMatchWeeks(
+  tx: Prisma.TransactionClient,
+  seasonId: string,
+  divisionId: string,
+  roundCount: number,
+) {
+  for (let round = 1; round <= roundCount; round += 1) {
+    await tx.matchWeek.upsert({
+      where: {
+        season_id_division_id_week_number: {
+          season_id: seasonId,
+          division_id: divisionId,
+          week_number: round,
+        },
+      },
+      update: {},
+      create: {
+        season_id: seasonId,
+        division_id: divisionId,
+        week_number: round,
+      },
     });
   }
 }

@@ -1,5 +1,57 @@
-import { describe, expect, it } from 'vitest';
-import { buildRoundRobin } from './fixture.service.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildRoundRobin, ensureMatchWeeks } from './fixture.service.js';
+
+describe('ensureMatchWeeks', () => {
+  it('reuses existing weeks and only creates missing week numbers', async () => {
+    const existing = new Map([
+      [1, { id: 'week-1', week_number: 1 }],
+      [3, { id: 'week-3', week_number: 3 }],
+    ]);
+    const upsert = vi.fn(async ({ where, create }: any) => {
+      const key = where.season_id_division_id_week_number.week_number;
+      return existing.get(key) ?? { id: `week-${key}`, week_number: create.week_number };
+    });
+
+    await ensureMatchWeeks(
+      { matchWeek: { upsert } } as any,
+      'season-1',
+      'division-1',
+      3,
+    );
+
+    expect(upsert).toHaveBeenCalledTimes(3);
+    expect(upsert).toHaveBeenNthCalledWith(1, {
+      where: {
+        season_id_division_id_week_number: {
+          season_id: 'season-1',
+          division_id: 'division-1',
+          week_number: 1,
+        },
+      },
+      update: {},
+      create: {
+        season_id: 'season-1',
+        division_id: 'division-1',
+        week_number: 1,
+      },
+    });
+    expect(upsert).toHaveBeenNthCalledWith(3, {
+      where: {
+        season_id_division_id_week_number: {
+          season_id: 'season-1',
+          division_id: 'division-1',
+          week_number: 3,
+        },
+      },
+      update: {},
+      create: {
+        season_id: 'season-1',
+        division_id: 'division-1',
+        week_number: 3,
+      },
+    });
+  });
+});
 
 describe('buildRoundRobin', () => {
   it('creates one round-robin match for every pair when the participant count is even', () => {
