@@ -75,6 +75,11 @@ enum DivisionType {
   VERIFIED_PRO
 }
 
+enum CompetitionFormat {
+  ROUND_ROBIN_SINGLE
+  ROUND_ROBIN_DOUBLE
+}
+
 enum ClubStatus {
   PENDING_APPROVAL
   ACTIVE
@@ -188,7 +193,7 @@ model User {
   user_roles         UserRole[]
   sessions           Session[]
   verification_tokens VerificationToken[]
-  login_attempts     LoginAttempt[]
+  login_attempts     LoginAttempt?
   club_applications  ClubApplication[]
   club_members       ClubMember[]
   disputes           Dispute[]
@@ -395,10 +400,6 @@ model Club {
 
   applications ClubApplication[]
   members      ClubMember[]
-  home_fixtures Fixture[]   @relation("clubHomeFixtures")
-  away_fixtures Fixture[]   @relation("clubAwayFixtures")
-  participants MatchParticipant[]
-  standings_rows StandingsRow[]
   rewards      Reward[]
   penalties    Penalty[]
   disputes     Dispute[]
@@ -471,7 +472,8 @@ model Division {
   id          String       @id @default(uuid()) @db.Uuid
   season_id   String       @db.Uuid
   name        String
-  type        DivisionType @default(AMATEUR)
+  type        DivisionType    @default(AMATEUR)
+  format      CompetitionFormat @default(ROUND_ROBIN_SINGLE)
   description String?
   capacity    Int?
   active      Boolean      @default(true)
@@ -506,7 +508,7 @@ model DivisionParticipant {
   player   PlayerProfile @relation(fields: [player_id], references: [id])
 
   @@unique([season_id, player_id])
-  @@unique([division_id, seed])
+  @@index([division_id, seed])
   @@index([season_id, player_id])
   @@map("division_participants")
 }
@@ -536,6 +538,7 @@ model Fixture {
   home_player_id String      @db.Uuid
   away_player_id String      @db.Uuid
   scheduled_at   DateTime?
+  schedule_key   String?
   status         MatchStatus @default(SCHEDULED)
   created_at     DateTime    @default(now()) @db.Timestamptz(6)
   updated_at     DateTime    @updatedAt @db.Timestamptz(6)
@@ -547,6 +550,7 @@ model Fixture {
   match       Match?
 
   @@index([division_id, scheduled_at])
+  @@unique([division_id, schedule_key])
   @@map("fixtures")
 }
 
