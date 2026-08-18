@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+      - name: Install dependencies
+        run: pnpm install
+      - name: Run lint
+        run: pnpm lint
+      - name: Run typecheck
+        run: pnpm -r build
+      - name: Validate Prisma schema
+        run: pnpm -C apps/api prisma:validate
+      - name: Run backend tests
+        run: pnpm -C apps/api test
+      - name: Run frontend tests
+        run: pnpm -C apps/web test
