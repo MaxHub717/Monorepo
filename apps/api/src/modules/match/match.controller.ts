@@ -28,9 +28,13 @@ export class MatchController {
   @Post('submit-result')
   @UseGuards(AuthGuard, AccountStatusGuard)
   async submitResult(@Body() dto: SubmitMatchResultDto, @Req() req: AuthRequest) {
-    // allow submitters to attribute themselves
-    if (!dto.submittedById && req.user?.id) dto.submittedById = req.user.id;
-    return this.matchService.submitMatchResult(dto);
+    const actorId = req.user?.id;
+
+    if (!actorId) {
+      throw new Error('Authenticated user identity is required to submit a match result');
+    }
+
+    return this.matchService.submitMatchResult(dto, { id: actorId });
   }
 
   @Post(':id/confirm')
