@@ -16,6 +16,8 @@ import { DisputeModule } from './modules/dispute/dispute.module.js';
 import { PenaltyModule } from './modules/penalty/penalty.module.js';
 import { StandingsModule } from './modules/standings/standings.module.js';
 import { NotificationModule } from './modules/notification/notification.module.js';
+import { ParticipationModule } from './modules/participation/participation.module.js';
+import { FixtureModule } from './modules/fixture/fixture.module.js';
 import { EventModule } from './modules/events/event.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
@@ -56,6 +58,8 @@ import { validate } from './config/env.validation.js';
     PenaltyModule,
     StandingsModule,
     NotificationModule,
+    ParticipationModule,
+    FixtureModule,
   ],
   controllers: [HealthController],
 })

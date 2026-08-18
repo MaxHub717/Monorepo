@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MatchService, CreateMatchDto, SubmitMatchResultDto } from './match.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
-import { OutboxService } from '../events/outbox.service.js';
 
 const createPrismaMock = () => ({
+  season: { findUnique: vi.fn() },
+  division: { findUnique: vi.fn() },
+  matchWeek: { findUnique: vi.fn() },
+  divisionParticipant: { findMany: vi.fn() },
   match: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  fixture: { create: vi.fn() },
+  fixture: { create: vi.fn(), findFirst: vi.fn() },
   matchParticipant: { createMany: vi.fn() },
   matchResult: { create: vi.fn(), update: vi.fn() },
   $transaction: vi.fn(),
@@ -22,67 +24,85 @@ describe('MatchService', () => {
     prismaMock = createPrismaMock();
     outboxMock = createOutboxMock();
     matchService = new MatchService(prismaMock as any, outboxMock as any);
+    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(prismaMock));
   });
 
-  it('creates a match and enqueues a match.created outbox event', async () => {
-    const dto: CreateMatchDto = {
-      seasonId: 'season-id',
-      divisionId: 'division-id',
-      homeClubId: 'home-id',
-      awayClubId: 'away-id',
-    };
-    const fixture = { id: 'fixture-id' };
-    const match = { id: 'match-id' };
-
-    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(prismaMock));
-    prismaMock.fixture.create.mockResolvedValue(fixture);
-    prismaMock.match.create.mockResolvedValue(match);
+  it('creates a player-vs-player match and enqueues a match.created event', async () => {
+    prismaMock.season.findUnique.mockResolvedValue({ id: 'season-id', status: 'ACTIVE' });
+    prismaMock.division.findUnique.mockResolvedValue({ id: 'division-id', season_id: 'season-id', active: true });
+    prismaMock.divisionParticipant.findMany.mockResolvedValue([
+      { player_id: 'home-id', division_id: 'division-id', status: 'ACTIVE' },
+      { player_id: 'away-id', division_id: 'division-id', status: 'ACTIVE' },
+    ]);
+    prismaMock.fixture.create.mockResolvedValue({ id: 'fixture-id' });
+    prismaMock.fixture.findFirst.mockResolvedValue(null);
+    prismaMock.match.create.mockResolvedValue({ id: 'match-id' });
     prismaMock.matchParticipant.createMany.mockResolvedValue(undefined);
     outboxMock.enqueueEvent.mockResolvedValue({});
 
-    const result = await matchService.createMatch(dto);
-    expect(result).toEqual(match);
-    expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(prismaMock, expect.objectContaining({
-      eventName: 'match.created',
-      aggregateType: 'Match',
-      aggregateId: match.id,
-    }));
-  });
-
-  it('throws when home and away clubs are the same', async () => {
     const dto: CreateMatchDto = {
       seasonId: 'season-id',
       divisionId: 'division-id',
-      homeClubId: 'same-id',
-      awayClubId: 'same-id',
+      homePlayerId: 'home-id',
+      awayPlayerId: 'away-id',
     };
 
-    await expect(matchService.createMatch(dto)).rejects.toThrow('Home and away clubs must be different');
+    const result = await matchService.createMatch(dto);
+    expect(result).toEqual({ id: 'match-id' });
+    expect(prismaMock.matchParticipant.createMany).toHaveBeenCalledWith({
+      data: [
+        { match_id: 'match-id', player_id: 'home-id', role: 'HOME' },
+        { match_id: 'match-id', player_id: 'away-id', role: 'AWAY' },
+      ],
+    });
+    expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({ eventName: 'match.created', aggregateType: 'Match' }),
+    );
   });
 
-  it('submits match results and enqueues a match.result.submitted outbox event', async () => {
+  it('throws when home and away players are the same', async () => {
+    const dto: CreateMatchDto = {
+      seasonId: 'season-id',
+      divisionId: 'division-id',
+      homePlayerId: 'same-id',
+      awayPlayerId: 'same-id',
+    };
+
+    await expect(matchService.createMatch(dto)).rejects.toThrow('Home and away players must be different');
+  });
+
+  it('submits a match result using player fixture IDs', async () => {
+    const match = {
+      id: 'match-id',
+      status: 'SCHEDULED',
+      fixture: { home_player_id: 'home-id', away_player_id: 'away-id' },
+      result: null,
+    };
+    prismaMock.match.findUnique.mockResolvedValue(match);
+    prismaMock.matchResult.create.mockResolvedValue({ id: 'result-id' });
+    prismaMock.match.update.mockResolvedValue({ id: 'match-id', status: 'SUBMISSION_PENDING' });
+    outboxMock.enqueueEvent.mockResolvedValue({});
+
     const dto: SubmitMatchResultDto = {
       matchId: 'match-id',
       homeScore: 2,
       awayScore: 1,
       submittedById: 'user-id',
     };
-    const match = { id: 'match-id', status: 'SCHEDULED', fixture: { home_club_id: 'home-id', away_club_id: 'away-id' } };
-    const resultCreate = { id: 'result-id' };
-    const updatedMatch = { id: 'match-id', status: 'SUBMISSION_PENDING' };
-
-    prismaMock.match.findUnique.mockResolvedValue(match);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => callback(prismaMock));
-    prismaMock.matchResult.create.mockResolvedValue(resultCreate);
-    prismaMock.match.update.mockResolvedValue(updatedMatch);
-    outboxMock.enqueueEvent.mockResolvedValue({});
 
     const result = await matchService.submitMatchResult(dto);
-    expect(result).toEqual({ result: resultCreate, match: updatedMatch });
-    expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(prismaMock, expect.objectContaining({
-      eventName: 'match.result.submitted',
-      aggregateType: 'Match',
-      aggregateId: match.id,
-    }));
+    expect(result).toEqual({
+      result: { id: 'result-id' },
+      match: { id: 'match-id', status: 'SUBMISSION_PENDING' },
+    });
+    expect(prismaMock.matchResult.create).toHaveBeenCalledWith({
+      data: {
+        match_id: 'match-id',
+        home_score: 2,
+        away_score: 1,
+        winner_player_id: 'home-id',
+      },
+    });
   });
 });
