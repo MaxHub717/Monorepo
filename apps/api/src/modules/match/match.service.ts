@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { IsDateString, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -37,10 +37,11 @@ export class SubmitMatchResultDto {
   @IsInt()
   @Min(0)
   awayScore!: number;
+}
 
-  @IsOptional()
-  @IsUUID('4')
-  submittedById?: string;
+export interface MatchResultActor {
+  id: string;
+  roles?: string[];
 }
 
 @Injectable()
@@ -160,11 +161,19 @@ export class MatchService {
     });
   }
 
-  async submitMatchResult(dto: SubmitMatchResultDto) {
+  async submitMatchResult(dto: SubmitMatchResultDto, actor: MatchResultActor) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const match = await tx.match.findUnique({
         where: { id: dto.matchId },
-        include: { fixture: true, result: true },
+        include: {
+          fixture: {
+            include: {
+              home_player: { select: { user_id: true } },
+              away_player: { select: { user_id: true } },
+            },
+          },
+          result: true,
+        },
       });
 
       if (!match) throw new NotFoundException('Match not found');
@@ -172,6 +181,44 @@ export class MatchService {
         throw new BadRequestException('Cannot submit a result for this match');
       }
       if (match.result) throw new BadRequestException('Result has already been submitted for this match');
+
+      const isParticipant = [
+        match.fixture.home_player.user_id,
+        match.fixture.away_player.user_id,
+      ].includes(actor.id);
+
+      const isOperator = actor.roles?.includes('OPERATOR') ?? false;
+      let isClubManager = false;
+
+      if (!isParticipant && (actor.roles?.includes('CLUB_MANAGER') ?? false)) {
+        const clubMembership = await tx.clubMember.findFirst({
+          where: {
+            user_id: actor.id,
+            role: 'MANAGER',
+            status: 'ACTIVE',
+            club: {
+              members: {
+                some: {
+                  user_id: {
+                    in: [
+                      match.fixture.home_player.user_id,
+                      match.fixture.away_player.user_id,
+                    ],
+                  },
+                  status: 'ACTIVE',
+                },
+              },
+            },
+          },
+          select: { id: true },
+        });
+
+        isClubManager = Boolean(clubMembership);
+      }
+
+      if (!isParticipant && !isOperator && !isClubManager) {
+        throw new ForbiddenException('Only match participants, their club manager, or an operator may submit a match result');
+      }
 
       const winnerPlayerId = dto.homeScore > dto.awayScore
         ? match.fixture.home_player_id
@@ -197,9 +244,11 @@ export class MatchService {
         eventName: 'match.result.submitted',
         aggregateType: 'Match',
         aggregateId: match.id,
+        actorId: actor.id,
+        actorRole: actor.roles?.[0],
         metadata: {
           result: { result: createdResult, match: updatedMatch },
-          submittedBy: dto.submittedById,
+          submittedBy: actor.id,
         },
       });
 
