@@ -10,3 +10,7 @@ logs
 .env.production
 *.log
 node_modules
+.env
+.env.docker
+.env.example
+.env.docker.local
