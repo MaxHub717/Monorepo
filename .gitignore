@@ -12,5 +12,4 @@ logs
 node_modules
 .env
 .env.docker
-.env.example
 .env.docker.local
