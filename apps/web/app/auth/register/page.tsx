@@ -5,6 +5,7 @@ import { register } from '../auth-client';
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [gamerTag, setGamerTag] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -14,7 +15,7 @@ export default function RegisterPage() {
     setError(null);
     setLoading(true);
     try {
-      await register(email, username, password);
+      await register(email, username, gamerTag, password);
       window.location.href = '/auth/login';
     } catch (err: any) {
       setError(err?.message ?? 'Registration failed');
@@ -34,6 +35,10 @@ export default function RegisterPage() {
         <label>
           Username
           <input value={username} onChange={(e) => setUsername(e.target.value)} />
+        </label>
+        <label>
+          Gamer Tag
+          <input value={gamerTag} onChange={(e) => setGamerTag(e.target.value)} required />
         </label>
         <label>
           Password

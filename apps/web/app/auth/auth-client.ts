@@ -1,6 +1,3 @@
-import { API_VERSION } from '@nexgen/shared';
-
-const apiVersion = API_VERSION;
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
 
 export type UserSession = {
@@ -29,16 +26,26 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}) {
 }
 
 export async function login(email: string, password: string) {
-  return apiFetch<{ accessToken: string; refreshToken: string; userId: string }>(`/${apiVersion}/auth/login`, {
+  return apiFetch<{ accessToken: string; refreshToken: string; userId: string }>(`/auth/login`, {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
 }
 
-export async function register(email: string, username: string, password: string) {
-  return apiFetch<{ userId: string; status: string }>(`/${apiVersion}/auth/register`, {
+export async function register(
+  email: string,
+  username: string,
+  gamerTag: string,
+  password: string
+) {
+  return apiFetch<{ userId: string; status: string }>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, username, password }),
+    body: JSON.stringify({
+      email,
+      username,
+      gamerTag,
+      password,
+    }),
   });
 }
 
@@ -47,22 +54,22 @@ export async function getMe() {
     id: string;
     email: string;
     roles: Array<string | { name?: string; role?: { name: string } }>;
-  }>(`/${apiVersion}/users/me`, { method: 'GET' });
+  }>(`/users/me`, { method: 'GET' });
 }
 
 export async function listAdminUsers() {
-  return apiFetch<Array<{ id: string; email: string; user_roles?: Array<{ role?: { name: string } }> }>>(`/${apiVersion}/admin/users`, { method: 'GET' });
+  return apiFetch<Array<{ id: string; email: string; user_roles?: Array<{ role?: { name: string } }> }>>(`/admin/users`, { method: 'GET' });
 }
 
 export async function assignUserRole(userId: string, roleName: string) {
-  return apiFetch(`/${apiVersion}/admin/users/${userId}/roles`, {
+  return apiFetch(`/admin/users/${userId}/roles`, {
     method: 'POST',
     body: JSON.stringify({ userId, roleName }),
   });
 }
 
 export async function revokeUserRole(userId: string, roleName: string) {
-  return apiFetch(`/${apiVersion}/admin/users/${userId}/roles/${roleName}`, {
+  return apiFetch(`/admin/users/${userId}/roles/${roleName}`, {
     method: 'DELETE',
   });
 }

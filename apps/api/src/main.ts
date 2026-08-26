@@ -38,8 +38,10 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  app.useGlobalGuards // app.get(ThrottlerGuard),
-  (app.get(AuthGuard), app.get(AccountStatusGuard));
+  app.useGlobalGuards(
+  app.get(AuthGuard),
+  app.get(AccountStatusGuard),
+);
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(
     new ResponseInterceptor(),
@@ -47,11 +49,6 @@ async function bootstrap() {
     new LoggingInterceptor(),
   );
 
-app.useGlobalInterceptors(
-  new ResponseInterceptor(),
-  new IdempotencyInterceptor(app.get(PrismaService)),
-  new LoggingInterceptor(),
-);
 
 console.log("A");
 

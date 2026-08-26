@@ -566,10 +566,16 @@ export class AuthService {
     },
   });
 
-  if (
-    !session ||
-    !(await argon2.verify(session.refresh_hash, input.refreshToken))
-  ) {
+  if (!session) {
+    throw new UnauthorizedException('Refresh token not recognized');
+  }
+
+  const refreshMatches = await argon2.verify(
+    session.refresh_hash,
+    input.refreshToken,
+  );
+
+  if (!refreshMatches) {
     throw new UnauthorizedException('Refresh token not recognized');
   }
 
@@ -590,13 +596,33 @@ export class AuthService {
     Date.now() + 30 * 24 * 60 * 60 * 1000,
   );
 
-  await this.prisma.session.update({
-    where: { id: session.id },
+  /*
+   * Atomic refresh-token rotation.
+   *
+   * Multiple requests may have already verified the same old token.
+   * Only the first request that still sees the original hash can
+   * successfully replace it.
+   *
+   * The second concurrent request will get count === 0 because
+   * refresh_hash has already changed.
+   */
+  const rotation = await this.prisma.session.updateMany({
+    where: {
+      id: session.id,
+      user_id: payload.sub,
+      refresh_hash: session.refresh_hash,
+      revoked_at: null,
+      expires_at: { gt: new Date() },
+    },
     data: {
       refresh_hash: refreshHash,
       expires_at: expiresAt,
     },
   });
+
+  if (rotation.count !== 1) {
+    throw new UnauthorizedException('Refresh token not recognized');
+  }
 
   return {
     accessToken,
