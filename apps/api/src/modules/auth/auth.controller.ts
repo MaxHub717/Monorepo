@@ -1,4 +1,13 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { AuthGuard, AccountStatusGuard } from '../../common/authz/authz.guards.js';
@@ -95,17 +104,21 @@ export class AuthController {
     return { status: 'refreshed' };
   }
 
-  @Post('logout')
-  @UseGuards(AuthGuard, AccountStatusGuard)
-  async logout(
-    @Body() body: LogoutDto,
-    @Req() request: Request,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const refreshToken = body.refreshToken || request.cookies?.refreshToken;
-    await this.authService.logout({ refreshToken });
-    response.clearCookie('accessToken', { path: '/' });
-    response.clearCookie('refreshToken', { path: '/' });
-    return { success: true };
-  }
+ @HttpCode(HttpStatus.OK)
+@Post('logout')
+@UseGuards(AuthGuard, AccountStatusGuard)
+async logout(
+  @Body() body: LogoutDto,
+  @Req() request: Request,
+  @Res({ passthrough: true }) response: Response,
+) {
+  const refreshToken = body.refreshToken || request.cookies?.refreshToken;
+
+  await this.authService.logout({ refreshToken });
+
+  response.clearCookie('accessToken', { path: '/' });
+  response.clearCookie('refreshToken', { path: '/' });
+
+  return { success: true };
+}
 }

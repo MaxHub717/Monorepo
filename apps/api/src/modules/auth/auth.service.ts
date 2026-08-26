@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
@@ -13,6 +18,7 @@ interface AuthPayload {
   sub: string;
   email: string;
   type: 'access' | 'refresh';
+  sid?: string;
 }
 
 @Injectable()
@@ -25,17 +31,30 @@ export class AuthService {
     private readonly auditService: AuditService,
   ) {}
 
-  async register(input: { email: string; username: string; password: string; gamerTag: string }) {
+  async register(input: {
+    email: string;
+    username: string;
+    password: string;
+    gamerTag: string;
+  }) {
     const existingUser = await this.prisma.user.findFirst({
-      where: { OR: [{ email: input.email }, { username: input.username }] },
+      where: {
+        OR: [{ email: input.email }, { username: input.username }],
+      },
     });
 
     if (existingUser?.email === input.email) {
-      throw new ConflictException({ code: 'EMAIL_EXISTS', message: 'An account with that email already exists.' });
+      throw new ConflictException({
+        code: 'EMAIL_EXISTS',
+        message: 'An account with that email already exists.',
+      });
     }
 
     if (existingUser?.username === input.username) {
-      throw new ConflictException({ code: 'USERNAME_EXISTS', message: 'That username is already taken.' });
+      throw new ConflictException({
+        code: 'USERNAME_EXISTS',
+        message: 'That username is already taken.',
+      });
     }
 
     const hashedPassword = await argon2.hash(input.password);
@@ -57,16 +76,25 @@ export class AuthService {
         },
       });
 
-      const playerRole = await tx.role.findUnique({ where: { name: RoleName.PLAYER } });
+      const playerRole = await tx.role.findUnique({
+        where: { name: RoleName.PLAYER },
+      });
+
       if (playerRole) {
-        await tx.userRole.create({ data: { user_id: user.id, role_id: playerRole.id } });
+        await tx.userRole.create({
+          data: {
+            user_id: user.id,
+            role_id: playerRole.id,
+          },
+        });
       }
 
-      // create deterministic token with id.secret pattern
+      // Create deterministic token with id.secret pattern.
       const secret = crypto.randomBytes(24).toString('hex');
       const id = crypto.randomUUID();
       const token = `${id}.${secret}`;
       const tokenHash = await argon2.hash(secret);
+
       await tx.verificationToken.create({
         data: {
           id,
@@ -81,40 +109,72 @@ export class AuthService {
         eventName: 'user.registered',
         aggregateType: 'User',
         aggregateId: user.id,
-        metadata: { email: input.email, username: input.username, gamerTag: input.gamerTag },
+        metadata: {
+          email: input.email,
+          username: input.username,
+          gamerTag: input.gamerTag,
+        },
       });
 
       await this.mailerService.sendVerificationEmail(input.email, token);
 
-      return { userId: user.id, status: 'pending' };
+      return {
+        userId: user.id,
+        status: 'pending',
+      };
     });
   }
 
   async verifyEmail(input: { token: string }) {
     const parts = input.token.split('.');
-    if (parts.length !== 2) throw new BadRequestException('Verification token is invalid or expired');
+
+    if (parts.length !== 2) {
+      throw new BadRequestException(
+        'Verification token is invalid or expired',
+      );
+    }
+
     const [id, secret] = parts;
 
-    const tokenRecord = await this.prisma.verificationToken.findUnique({ where: { id } });
+    const tokenRecord = await this.prisma.verificationToken.findUnique({
+      where: { id },
+    });
 
-    if (!tokenRecord || tokenRecord.purpose !== 'EMAIL_VERIFY' || tokenRecord.expires_at <= new Date() || tokenRecord.consumed_at) {
-      throw new BadRequestException('Verification token is invalid or expired');
+    if (
+      !tokenRecord ||
+      tokenRecord.purpose !== 'EMAIL_VERIFY' ||
+      tokenRecord.expires_at <= new Date() ||
+      tokenRecord.consumed_at
+    ) {
+      throw new BadRequestException(
+        'Verification token is invalid or expired',
+      );
     }
 
     const matches = await argon2.verify(tokenRecord.token_hash, secret);
+
     if (!matches) {
-      throw new BadRequestException('Verification token is invalid or expired');
+      throw new BadRequestException(
+        'Verification token is invalid or expired',
+      );
     }
 
     await this.prisma.$transaction(async (tx: any) => {
       await tx.user.update({
         where: { id: tokenRecord.user_id },
-        data: { account_status: 'ACTIVE', email_verified_at: new Date() },
+        data: {
+          account_status: 'ACTIVE',
+          email_verified_at: new Date(),
+        },
       });
+
       await tx.verificationToken.update({
         where: { id: tokenRecord.id },
-        data: { consumed_at: new Date() },
+        data: {
+          consumed_at: new Date(),
+        },
       });
+
       await this.outboxService.enqueueEvent(tx, {
         eventName: 'user.verified',
         aggregateType: 'User',
@@ -122,16 +182,25 @@ export class AuthService {
       });
     });
 
-    return { success: true };
+    return {
+      success: true,
+    };
   }
 
   async resendVerification(email: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) throw new BadRequestException('User not found');
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
     const secret = crypto.randomBytes(24).toString('hex');
     const id = crypto.randomUUID();
     const token = `${id}.${secret}`;
     const tokenHash = await argon2.hash(secret);
+
     await this.prisma.verificationToken.create({
       data: {
         id,
@@ -141,17 +210,30 @@ export class AuthService {
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
     });
+
     await this.mailerService.sendVerificationEmail(email, token);
-    return { success: true };
+
+    return {
+      success: true,
+    };
   }
 
   async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) return { success: true };
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return {
+        success: true,
+      };
+    }
+
     const secret = crypto.randomBytes(24).toString('hex');
     const id = crypto.randomUUID();
     const token = `${id}.${secret}`;
     const tokenHash = await argon2.hash(secret);
+
     await this.prisma.verificationToken.create({
       data: {
         id,
@@ -161,33 +243,83 @@ export class AuthService {
         expires_at: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
+
     await this.mailerService.sendPasswordResetEmail(email, token);
-    return { success: true };
+
+    return {
+      success: true,
+    };
   }
 
-  async resetPassword(input: { token: string; password: string }) {
+  async resetPassword(input: {
+    token: string;
+    password: string;
+  }) {
     const parts = input.token.split('.');
-    if (parts.length !== 2) throw new BadRequestException('Reset token is invalid or expired');
-    const [id, secret] = parts;
 
-    const tokenRecord = await this.prisma.verificationToken.findUnique({ where: { id } });
-
-    if (!tokenRecord || tokenRecord.purpose !== 'PASSWORD_RESET' || tokenRecord.consumed_at || tokenRecord.expires_at <= new Date()) {
-      throw new BadRequestException('Reset token is invalid or expired');
+    if (parts.length !== 2) {
+      throw new BadRequestException(
+        'Reset token is invalid or expired',
+      );
     }
 
-    const matches = await argon2.verify(tokenRecord.token_hash, secret);
-    if (!matches) throw new BadRequestException('Reset token is invalid or expired');
+    const [id, secret] = parts;
+
+    const tokenRecord = await this.prisma.verificationToken.findUnique({
+      where: { id },
+    });
+
+    if (
+      !tokenRecord ||
+      tokenRecord.purpose !== 'PASSWORD_RESET' ||
+      tokenRecord.consumed_at ||
+      tokenRecord.expires_at <= new Date()
+    ) {
+      throw new BadRequestException(
+        'Reset token is invalid or expired',
+      );
+    }
+
+    const matches = await argon2.verify(
+      tokenRecord.token_hash,
+      secret,
+    );
+
+    if (!matches) {
+      throw new BadRequestException(
+        'Reset token is invalid or expired',
+      );
+    }
 
     const hashedPassword = await argon2.hash(input.password);
 
     await this.prisma.$transaction(async (tx: any) => {
-      await tx.user.update({ where: { id: tokenRecord.user_id }, data: { password_hash: hashedPassword } });
-      await tx.session.updateMany({ where: { user_id: tokenRecord.user_id, revoked_at: null }, data: { revoked_at: new Date() } });
-      await tx.verificationToken.update({ where: { id: tokenRecord.id }, data: { consumed_at: new Date() } });
+      await tx.user.update({
+        where: { id: tokenRecord.user_id },
+        data: {
+          password_hash: hashedPassword,
+        },
+      });
+
+      await tx.session.updateMany({
+        where: {
+          user_id: tokenRecord.user_id,
+          revoked_at: null,
+        },
+        data: {
+          revoked_at: new Date(),
+        },
+      });
+
+      await tx.verificationToken.update({
+        where: { id: tokenRecord.id },
+        data: {
+          consumed_at: new Date(),
+        },
+      });
     });
 
-    // emit outbox/audit outside tx
+    // Emit outbox/audit outside transaction.
     try {
       await this.outboxService.enqueueEventDirect?.({
         eventName: 'user.password_reset',
@@ -203,76 +335,171 @@ export class AuthService {
         entityId: tokenRecord.user_id,
         action: 'password_reset',
         actorId: tokenRecord.user_id,
-        metadata: { method: 'password_reset' },
+        metadata: {
+          method: 'password_reset',
+        },
       });
     } catch {}
 
-    return { success: true };
+    return {
+      success: true,
+    };
   }
 
-  async login(input: { email: string; password: string }) {
-    const user = await this.prisma.user.findUnique({ where: { email: input.email } });
+  async login(input: {
+    email: string;
+    password: string;
+  }) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: input.email },
+    });
 
     if (!user) {
-      // emit failed login audit/outbox
       await this.outboxService.enqueueEventDirect?.({
         eventName: 'user.login_failed',
         aggregateType: 'User',
         aggregateId: input.email,
-        metadata: { reason: 'user not found' },
+        metadata: {
+          reason: 'user not found',
+        },
       } as any).catch(() => null);
-      throw new UnauthorizedException('Invalid email or password');
+
+      throw new UnauthorizedException(
+        'Invalid email or password',
+      );
     }
 
-    const loginAttempt = await this.prisma.loginAttempt.findFirst({ where: { user_id: user.id } });
+    const loginAttempt = await this.prisma.loginAttempt.findFirst({
+      where: {
+        user_id: user.id,
+      },
+    });
+
     const now = new Date();
-    if (loginAttempt?.locked_until && loginAttempt.locked_until > now) {
-      throw new UnauthorizedException('Account is temporarily locked');
+
+    if (
+      loginAttempt?.locked_until &&
+      loginAttempt.locked_until > now
+    ) {
+      throw new UnauthorizedException(
+        'Account is temporarily locked',
+      );
     }
 
-    const passwordMatches = await argon2.verify(user.password_hash, input.password);
+    const passwordMatches = await argon2.verify(
+      user.password_hash,
+      input.password,
+    );
+
     if (!passwordMatches) {
-      const nextAttempts = (loginAttempt?.attempts ?? 0) + 1;
+      const nextAttempts =
+        (loginAttempt?.attempts ?? 0) + 1;
+
       if (loginAttempt) {
         await this.prisma.loginAttempt.update({
-          where: { id: loginAttempt.id },
-          data: { attempts: nextAttempts, locked_until: nextAttempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null },
+          where: {
+            id: loginAttempt.id,
+          },
+          data: {
+            attempts: nextAttempts,
+            locked_until:
+              nextAttempts >= 5
+                ? new Date(
+                    Date.now() + 15 * 60 * 1000,
+                  )
+                : null,
+          },
         });
       } else {
-        await this.prisma.loginAttempt.create({ data: { user_id: user.id, attempts: 1 } });
+        await this.prisma.loginAttempt.create({
+          data: {
+            user_id: user.id,
+            attempts: 1,
+          },
+        });
       }
+
       await this.outboxService.enqueueEventDirect?.({
         eventName: 'user.login_failed',
         aggregateType: 'User',
         aggregateId: user.id,
         actorId: user.id,
-        metadata: { reason: 'invalid_password' },
+        metadata: {
+          reason: 'invalid_password',
+        },
       } as any).catch(() => null);
-      throw new UnauthorizedException('Invalid email or password');
+
+      throw new UnauthorizedException(
+        'Invalid email or password',
+      );
     }
 
     if (loginAttempt) {
-      await this.prisma.loginAttempt.update({ where: { id: loginAttempt.id }, data: { attempts: 0, locked_until: null } });
+      await this.prisma.loginAttempt.update({
+        where: {
+          id: loginAttempt.id,
+        },
+        data: {
+          attempts: 0,
+          locked_until: null,
+        },
+      });
     }
 
-    if (user.account_status !== 'ACTIVE' || !user.email_verified_at) {
-      throw new UnauthorizedException('Account is not active or verified');
+    if (
+      user.account_status !== 'ACTIVE' ||
+      !user.email_verified_at
+    ) {
+      throw new UnauthorizedException(
+        'Account is not active or verified',
+      );
     }
 
-    const accessToken = this.createAccessToken(user.id, user.email);
-    const refreshToken = this.createRefreshToken(user.id, user.email);
-    const refreshHash = await argon2.hash(refreshToken);
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    /*
+     * Create the database session first.
+     *
+     * The refresh JWT is bound to this exact session through
+     * the `sid` claim. This prevents a refresh token from
+     * accidentally matching another active session belonging
+     * to the same user.
+     */
+    const expiresAt = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    );
 
-    await this.prisma.session.create({
+    const session = await this.prisma.session.create({
       data: {
         user_id: user.id,
-        refresh_hash: refreshHash,
+        refresh_hash: '',
         expires_at: expiresAt,
       },
     });
 
-    // successful login audit/outbox
+    const accessToken = this.createAccessToken(
+      user.id,
+      user.email,
+    );
+
+    const refreshToken = this.createRefreshToken(
+      user.id,
+      user.email,
+      session.id,
+    );
+
+    const refreshHash = await argon2.hash(
+      refreshToken,
+    );
+
+    await this.prisma.session.update({
+      where: {
+        id: session.id,
+      },
+      data: {
+        refresh_hash: refreshHash,
+      },
+    });
+
+    // Successful login audit/outbox.
     await this.outboxService.enqueueEventDirect?.({
       eventName: 'user.login_success',
       aggregateType: 'User',
@@ -281,13 +508,28 @@ export class AuthService {
       actorRole: RoleName.PLAYER,
     } as any).catch(() => null);
 
-    const roles = await this.prisma.userRole.findMany({ where: { user_id: user.id }, include: { role: true } });
-    const role = roles[0]?.role?.name ?? RoleName.PLAYER;
+    const roles = await this.prisma.userRole.findMany({
+      where: {
+        user_id: user.id,
+      },
+      include: {
+        role: true,
+      },
+    });
 
-    return { accessToken, refreshToken, userId: user.id, role };
+    const role =
+      roles[0]?.role?.name ?? RoleName.PLAYER;
+
+    return {
+      accessToken,
+      refreshToken,
+      userId: user.id,
+      role,
+    };
   }
 
   private verifyRefreshToken(token: string): AuthPayload {
+  try {
     const secret = this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
     const decoded = jwt.verify(token, secret);
 
@@ -296,74 +538,139 @@ export class AuthService {
     }
 
     const payload = decoded as AuthPayload;
-    if (!payload.sub || !payload.email || payload.type !== 'refresh') {
+
+    if (
+      !payload.sub ||
+      !payload.email ||
+      payload.type !== 'refresh' ||
+      !payload.sid
+    ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     return payload;
+  } catch {
+    throw new UnauthorizedException('Invalid refresh token');
   }
+}
 
   async refresh(input: { refreshToken: string }) {
-    const payload = this.verifyRefreshToken(input.refreshToken);
+  const payload = this.verifyRefreshToken(input.refreshToken);
 
-    const session = await this.prisma.session.findFirst({
-      where: {
-        user_id: payload.sub,
-        revoked_at: null,
-        expires_at: { gt: new Date() },
-      },
-    });
+  const session = await this.prisma.session.findFirst({
+    where: {
+      id: payload.sid,
+      user_id: payload.sub,
+      revoked_at: null,
+      expires_at: { gt: new Date() },
+    },
+  });
 
-    if (!session || !(await argon2.verify(session.refresh_hash, input.refreshToken))) {
-      throw new UnauthorizedException('Refresh token not recognized');
-    }
-
-    const accessToken = this.createAccessToken(payload.sub, payload.email);
-    const refreshToken = this.createRefreshToken(payload.sub, payload.email);
-    const refreshHash = await argon2.hash(refreshToken);
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { refresh_hash: refreshHash, expires_at: expiresAt },
-    });
-
-    return { accessToken, refreshToken };
+  if (
+    !session ||
+    !(await argon2.verify(session.refresh_hash, input.refreshToken))
+  ) {
+    throw new UnauthorizedException('Refresh token not recognized');
   }
 
+  const accessToken = this.createAccessToken(
+    payload.sub,
+    payload.email,
+  );
+
+  const refreshToken = this.createRefreshToken(
+    payload.sub,
+    payload.email,
+    session.id,
+  );
+
+  const refreshHash = await argon2.hash(refreshToken);
+
+  const expiresAt = new Date(
+    Date.now() + 30 * 24 * 60 * 60 * 1000,
+  );
+
+  await this.prisma.session.update({
+    where: { id: session.id },
+    data: {
+      refresh_hash: refreshHash,
+      expires_at: expiresAt,
+    },
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+  };
+}
   async logout(input: { refreshToken: string }) {
-    const payload = this.verifyRefreshToken(input.refreshToken);
+  const payload = this.verifyRefreshToken(input.refreshToken);
 
-    const session = await this.prisma.session.findFirst({
-      where: {
-        user_id: payload.sub,
-        revoked_at: null,
+  const session = await this.prisma.session.findFirst({
+    where: {
+      id: payload.sid,
+      user_id: payload.sub,
+      revoked_at: null,
+    },
+  });
+
+  if (
+    !session ||
+    !(await argon2.verify(session.refresh_hash, input.refreshToken))
+  ) {
+    throw new UnauthorizedException('Refresh token not recognized');
+  }
+
+  await this.prisma.session.update({
+    where: { id: session.id },
+    data: {
+      revoked_at: new Date(),
+    },
+  });
+
+  return { success: true };
+}
+
+  createAccessToken(
+    userId: string,
+    email: string,
+  ) {
+    const secret =
+      this.config.getOrThrow<string>(
+        'JWT_ACCESS_SECRET',
+      );
+
+    return jwt.sign(
+      {
+        sub: userId,
+        email,
+        type: 'access',
       },
-    });
-
-    if (!session || !(await argon2.verify(session.refresh_hash, input.refreshToken))) {
-      throw new UnauthorizedException('Refresh token not recognized');
-    }
-
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { revoked_at: new Date() },
-    });
-
-    return { success: true };
+      secret,
+      {
+        expiresIn: '15m',
+      },
+    );
   }
 
-  createAccessToken(userId: string, email: string) {
-    const secret = this.config.getOrThrow<string>('JWT_ACCESS_SECRET');
-    return jwt.sign({ sub: userId, email, type: 'access' }, secret, {
-      expiresIn: '15m',
-    });
-  }
+  createRefreshToken(
+  userId: string,
+  email: string,
+  sessionId: string,
+) {
+  const secret = this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
 
-  createRefreshToken(userId: string, email: string) {
-    const secret = this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
-    return jwt.sign({ sub: userId, email, type: 'refresh' }, secret, {
+  return jwt.sign(
+    {
+      sub: userId,
+      email,
+      type: 'refresh',
+      sid: sessionId,
+    },
+    secret,
+    {
       expiresIn: '30d',
-    });
-  }
+    },
+  );
+}
 }
