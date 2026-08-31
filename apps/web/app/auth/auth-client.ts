@@ -1,34 +1,53 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
 
-export type UserSession = {
-  userId: string;
-  email: string;
-  roles: string[];
-  token: string;
+type ApiError = {
+  error?: {
+    message?: string;
+  };
 };
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function authFetch<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
     },
     credentials: 'include',
-    ...options,
   });
 
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(payload?.error?.message ?? 'API request failed');
+  const payload = (await response.json().catch(() => null)) as
+    | T
+    | ApiError
+    | null;
+
+  if (!response.ok) {
+    const message =
+      (payload as ApiError | null)?.error?.message ?? 'Authentication request failed';
+
+    throw new Error(message);
   }
 
-  return res.json() as Promise<T>;
+  return payload as T;
 }
 
 export async function login(email: string, password: string) {
-  return apiFetch<{ accessToken: string; refreshToken: string; userId: string }>(`/auth/login`, {
+  return authFetch<{
+    success: boolean;
+    data: {
+      userId: string;
+    };
+    error: null;
+  }>('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({
+      email,
+      password,
+    }),
   });
 }
 
@@ -36,9 +55,16 @@ export async function register(
   email: string,
   username: string,
   gamerTag: string,
-  password: string
+  password: string,
 ) {
-  return apiFetch<{ userId: string; status: string }>('/auth/register', {
+  return authFetch<{
+    success: boolean;
+    data: {
+      userId: string;
+      status: string;
+    };
+    error: null;
+  }>('/auth/register', {
     method: 'POST',
     body: JSON.stringify({
       email,
@@ -49,27 +75,8 @@ export async function register(
   });
 }
 
-export async function getMe() {
-  return apiFetch<{
-    id: string;
-    email: string;
-    roles: Array<string | { name?: string; role?: { name: string } }>;
-  }>(`/users/me`, { method: 'GET' });
-}
-
-export async function listAdminUsers() {
-  return apiFetch<Array<{ id: string; email: string; user_roles?: Array<{ role?: { name: string } }> }>>(`/admin/users`, { method: 'GET' });
-}
-
-export async function assignUserRole(userId: string, roleName: string) {
-  return apiFetch(`/admin/users/${userId}/roles`, {
+export async function logout(): Promise<void> {
+  await apiFetch<{ success: boolean }>('/auth/logout', {
     method: 'POST',
-    body: JSON.stringify({ userId, roleName }),
-  });
-}
-
-export async function revokeUserRole(userId: string, roleName: string) {
-  return apiFetch(`/admin/users/${userId}/roles/${roleName}`, {
-    method: 'DELETE',
   });
 }

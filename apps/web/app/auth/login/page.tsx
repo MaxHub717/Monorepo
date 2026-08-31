@@ -17,7 +17,7 @@ export default function LoginPage() {
     try {
       await login(email, password);
       // TODO: redirect to app
-      window.location.href = '/';
+      window.location.href = '/player/dashboard';
     } catch (err: any) {
       setError(err?.message ?? 'Login failed');
     } finally {

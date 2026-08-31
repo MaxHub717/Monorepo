@@ -1,7 +1,7 @@
 import type { ApiEnvelope } from '@nexgen/shared';
 
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
 
 export type UserProfile = {
   id: string;
@@ -65,8 +65,15 @@ export type CreateClubInput = {
 };
 
 export type CreateClubResponse = {
-  club: { id: string; name: string; status: string };
-  application: { id: string; status: string };
+  club: {
+    id: string;
+    name: string;
+    status: string;
+  };
+  application: {
+    id: string;
+    status: string;
+  };
 };
 
 export type PlayerProfileUpdateInput = {
@@ -119,127 +126,218 @@ export type MatchSummary = {
   status: string;
 };
 
-async function apiFetch<T>(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+/**
+ * Canonical browser API client.
+ *
+ * Authentication is cookie-based. The browser never reads or stores
+ * accessToken or refreshToken.
+ */
+export async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
     },
-    credentials: 'include',
-    ...options,
   });
 
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(payload?.error?.message ?? 'API request failed');
+  const payload = (await response.json().catch(() => null)) as
+    | ApiEnvelope<T>
+    | {
+        success?: boolean;
+        error?: {
+          message?: string;
+        };
+      }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      payload &&
+        'error' in payload &&
+        payload.error?.message
+        ? payload.error.message
+        : 'API request failed',
+    );
   }
 
-  return res.json() as Promise<ApiEnvelope<T>>;
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !('success' in payload) ||
+    payload.success !== true
+  ) {
+    throw new Error('Invalid API response');
+  }
+
+  return payload.data;
 }
 
 export async function getUserMe(): Promise<UserProfile> {
-  const envelope = await apiFetch<UserProfile>(`/users/me`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+  return apiFetch<UserProfile>(
+    `/users/me`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export async function getLeaderboards(): Promise<LeaderboardsResponse> {
-  const envelope = await apiFetch<LeaderboardsResponse>(`/standings/leaderboards`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+  return apiFetch<LeaderboardsResponse>(
+    `/standings/leaderboards`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export async function listMatches(): Promise<MatchSummary[]> {
-  const envelope = await apiFetch<MatchSummary[]>(`/matches`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+  return apiFetch<MatchSummary[]>(
+    `/matches`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export async function getMyPlayerProfile(): Promise<PlayerProfileResponse> {
-  const envelope = await apiFetch<PlayerProfileResponse>(`/players/me/profile`, {
-    method: 'GET',
-    cache: 'no-store',
-  });
-  return envelope.data;
+  return apiFetch<PlayerProfileResponse>(
+    `/players/me/profile`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+    },
+  );
 }
 
-export async function updateMyPlayerProfile(payload: PlayerProfileUpdateInput): Promise<PlayerProfileUpdateResponse> {
-  const envelope = await apiFetch<PlayerProfileUpdateResponse>(`/players/me/profile`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  });
-  return envelope.data;
+export async function updateMyPlayerProfile(
+  payload: PlayerProfileUpdateInput,
+): Promise<PlayerProfileUpdateResponse> {
+  return apiFetch<PlayerProfileUpdateResponse>(
+    `/players/me/profile`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-export async function createClub(dto: CreateClubInput): Promise<ClubCreateResponse> {
-  const envelope = await apiFetch<ClubCreateResponse>(`/clubs`, {
-    method: 'POST',
-    body: JSON.stringify(dto),
-  });
-  return envelope.data;
+export async function createClub(
+  dto: CreateClubInput,
+): Promise<ClubCreateResponse> {
+  return apiFetch<ClubCreateResponse>(
+    `/clubs`,
+    {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    },
+  );
 }
 
-export async function applyToClub(clubId: string): Promise<{ id: string; status: string }> {
-  const envelope = await apiFetch<{ id: string; status: string }>(`/clubs/${clubId}/applications`, {
-    method: 'POST',
-  });
-  return envelope.data;
+export async function applyToClub(
+  clubId: string,
+): Promise<{ id: string; status: string }> {
+  return apiFetch<{ id: string; status: string }>(
+    `/clubs/${clubId}/applications`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function listClubApplications(clubId: string): Promise<ClubApplicationSummary[]> {
-  const envelope = await apiFetch<ClubApplicationSummary[]>(`/clubs/${clubId}/applications`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+export async function listClubApplications(
+  clubId: string,
+): Promise<ClubApplicationSummary[]> {
+  return apiFetch<ClubApplicationSummary[]>(
+    `/clubs/${clubId}/applications`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
-export async function approveClubApplication(applicationId: string): Promise<unknown> {
-  const envelope = await apiFetch<unknown>(`/clubs/applications/${applicationId}/approve`, {
-    method: 'POST',
-  });
-  return envelope.data;
+export async function approveClubApplication(
+  applicationId: string,
+): Promise<unknown> {
+  return apiFetch<unknown>(
+    `/clubs/applications/${applicationId}/approve`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function rejectClubApplication(applicationId: string): Promise<unknown> {
-  const envelope = await apiFetch<unknown>(`/clubs/applications/${applicationId}/reject`, {
-    method: 'POST',
-  });
-  return envelope.data;
+export async function rejectClubApplication(
+  applicationId: string,
+): Promise<unknown> {
+  return apiFetch<unknown>(
+    `/clubs/applications/${applicationId}/reject`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function removeClubMember(clubId: string, memberUserId: string): Promise<unknown> {
-  const envelope = await apiFetch<unknown>(`/clubs/${clubId}/members/${memberUserId}`, {
-    method: 'DELETE',
-  });
-  return envelope.data;
+export async function removeClubMember(
+  clubId: string,
+  memberUserId: string,
+): Promise<unknown> {
+  return apiFetch<unknown>(
+    `/clubs/${clubId}/members/${memberUserId}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
-export async function updateClubMemberStatus(clubId: string, memberUserId: string, status: string): Promise<unknown> {
-  const envelope = await apiFetch<unknown>(`/clubs/${clubId}/members/${memberUserId}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
-  return envelope.data;
+export async function updateClubMemberStatus(
+  clubId: string,
+  memberUserId: string,
+  status: string,
+): Promise<unknown> {
+  return apiFetch<unknown>(
+    `//clubs/${clubId}/members/${memberUserId}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    },
+  );
 }
 
-export async function listRecruitmentPool(params: { division?: string; region?: string } = {}): Promise<RecruitmentProfile[]> {
+export async function listRecruitmentPool(
+  params: { division?: string; region?: string } = {},
+): Promise<RecruitmentProfile[]> {
   const searchParams = new URLSearchParams();
-  if (params.division) searchParams.set('division', params.division);
-  if (params.region) searchParams.set('region', params.region);
-  const envelope = await apiFetch<RecruitmentProfile[]>(`/players/recruitment-pool?${searchParams.toString()}`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+
+  if (params.division) {
+    searchParams.set('division', params.division);
+  }
+
+  if (params.region) {
+    searchParams.set('region', params.region);
+  }
+
+  const query = searchParams.toString();
+
+  return apiFetch<RecruitmentProfile[]>(
+    `/players/recruitment-pool${query ? `?${query}` : ''}`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export async function listClubs(): Promise<ClubSummary[]> {
-  const envelope = await apiFetch<ClubSummary[]>(`/clubs`, {
-    cache: 'no-store',
-  });
-  return envelope.data;
+  return apiFetch<ClubSummary[]>(
+    `/clubs`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
 export type SeasonSummary = {
@@ -250,62 +348,195 @@ export type SeasonSummary = {
   end_date?: string;
   registration_open_at?: string;
   registration_close_at?: string;
-  divisions?: Array<{ id: string; name: string; type: string; capacity: number; active: boolean }>;
+  divisions?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    capacity: number;
+    active: boolean;
+  }>;
 };
 
 export async function listSeasons(): Promise<SeasonSummary[]> {
-  const envelope = await apiFetch<SeasonSummary[]>(`/seasons`, { cache: 'no-store' });
-  return envelope.data;
+  return apiFetch<SeasonSummary[]>(
+    `/seasons`,
+    {
+      cache: 'no-store',
+    },
+  );
 }
 
-export async function publishSeason(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/publish`, { method: 'POST' });
-  return envelope.data;
+export async function publishSeason(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/publish`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function closeSeasonRegistration(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/close-registration`, { method: 'POST' });
-  return envelope.data;
+export async function closeSeasonRegistration(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/close-registration`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function activateSeason(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/activate`, { method: 'POST' });
-  return envelope.data;
+export async function activateSeason(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/activate`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function startSeasonPlayoffs(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/start-playoffs`, { method: 'POST' });
-  return envelope.data;
+export async function startSeasonPlayoffs(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/start-playoffs`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function completeSeason(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/complete`, { method: 'POST' });
-  return envelope.data;
+export async function completeSeason(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/complete`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function archiveSeason(seasonId: string): Promise<SeasonSummary> {
-  const envelope = await apiFetch<SeasonSummary>(`/seasons/${seasonId}/archive`, { method: 'POST' });
-  return envelope.data;
+export async function archiveSeason(
+  seasonId: string,
+): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(
+    `/seasons/${seasonId}/archive`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
-export async function createDivision(seasonId: string, payload: { name: string; type?: string; capacity?: number; active?: boolean }) {
-  const envelope = await apiFetch<any>(`/seasons/${seasonId}/divisions`, { method: 'POST', body: JSON.stringify(payload) });
-  return envelope.data;
+export async function createDivision(
+  seasonId: string,
+  payload: {
+    name: string;
+    type?: string;
+    capacity?: number;
+    active?: boolean;
+  },
+) {
+  return apiFetch<any>(
+    `/seasons/${seasonId}/divisions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-export async function updateDivision(divisionId: string, payload: { name?: string; type?: string; capacity?: number; active?: boolean }) {
-  const envelope = await apiFetch<any>(`/seasons/divisions/${divisionId}`, { method: 'PATCH', body: JSON.stringify(payload) });
-  return envelope.data;
+export async function updateDivision(
+  divisionId: string,
+  payload: {
+    name?: string;
+    type?: string;
+    capacity?: number;
+    active?: boolean;
+  },
+) {
+  return apiFetch<any>(
+    `/seasons/divisions/${divisionId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-export async function deactivateDivision(divisionId: string) {
-  const envelope = await apiFetch<any>(`/seasons/divisions/${divisionId}`, { method: 'DELETE' });
-  return envelope.data;
+export async function deactivateDivision(
+  divisionId: string,
+) {
+  return apiFetch<any>(
+    `//seasons/divisions/${divisionId}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
-export async function getSeasonStandings(seasonId: string): Promise<{ seasonId: string; rows: StandingsRow[] }> {
-  const envelope = await apiFetch<{ seasonId: string; rows: StandingsRow[] }>(`/standings/seasons/${seasonId}`, {
+export async function getSeasonStandings(
+  seasonId: string,
+): Promise<{ seasonId: string; rows: StandingsRow[] }> {
+  return apiFetch<{ seasonId: string; rows: StandingsRow[] }>(
+    `/standings/seasons/${seasonId}`,
+    {
+      cache: 'no-store',
+    },
+  );
+}
+
+/**
+ * Admin API operations belong here too.
+ * auth-client.ts must not become a second general-purpose API client.
+ */
+export async function listAdminUsers(): Promise<
+  Array<{
+    id: string;
+    email: string;
+    user_roles?: Array<{ role?: { name: string } }>;
+  }>
+> {
+  return apiFetch<
+    Array<{
+      id: string;
+      email: string;
+      user_roles?: Array<{ role?: { name: string } }>;
+    }>
+  >(`/admin/users`, {
+    method: 'GET',
     cache: 'no-store',
   });
-  return envelope.data;
+}
+
+export async function assignUserRole(
+  userId: string,
+  roleName: string,
+) {
+  return apiFetch(
+    `/admin/users/${userId}/roles`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        userId,
+        roleName,
+      }),
+    },
+  );
+}
+
+export async function revokeUserRole(
+  userId: string,
+  roleName: string,
+) {
+  return apiFetch(
+    `/admin/users/${userId}/roles/${roleName}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }

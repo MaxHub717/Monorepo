@@ -1,24 +1,35 @@
 import { redirect } from 'next/navigation';
-import { getUserMe } from './api-client';
+import { apiServerFetch } from './api-server-client';
 
-export async function requireUser(redirectTo = '/player/dashboard') {
+export type AuthenticatedUser = {
+  id: string;
+  email: string;
+  roles?: string[];
+};
+
+export async function requireUser(
+  redirectTo = '/auth/login',
+): Promise<AuthenticatedUser> {
   try {
-    const user = await getUserMe();
-    return user;
-  } catch (error) {
-    redirect('/');
+    return await apiServerFetch<AuthenticatedUser>('/users/me');
+  } catch {
+    redirect(redirectTo);
   }
 }
 
-export async function requireRole(requiredRole: string, redirectTo = '/') {
+export async function requireRole(
+  requiredRole: string,
+  redirectTo = '/',
+): Promise<AuthenticatedUser> {
   try {
-    const user = await getUserMe();
+    const user = await apiServerFetch<AuthenticatedUser>('/users/me');
+
     if (!user.roles?.includes(requiredRole)) {
-      redirect('/');
+      redirect(redirectTo);
     }
 
     return user;
-  } catch (error) {
-    redirect('/');
+  } catch {
+    redirect('/auth/login');
   }
 }
