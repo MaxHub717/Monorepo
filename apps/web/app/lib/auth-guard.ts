@@ -5,6 +5,7 @@ export type AuthenticatedUser = {
   id: string;
   email: string;
   roles?: string[];
+  permissions?: string[];
 };
 
 export async function requireUser(
@@ -25,6 +26,23 @@ export async function requireRole(
     const user = await apiServerFetch<AuthenticatedUser>('/users/me');
 
     if (!user.roles?.includes(requiredRole)) {
+      redirect(redirectTo);
+    }
+
+    return user;
+  } catch {
+    redirect('/auth/login');
+  }
+}
+
+export async function requirePermission(
+  requiredPermission: string,
+  redirectTo = '/',
+): Promise<AuthenticatedUser> {
+  try {
+    const user = await apiServerFetch<AuthenticatedUser>('/users/me');
+
+    if (!user.permissions?.includes(requiredPermission)) {
       redirect(redirectTo);
     }
 

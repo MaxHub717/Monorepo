@@ -6,39 +6,59 @@ export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        account_status: true,
-        email_verified_at: true,
-        created_at: true,
-        updated_at: true,
-        player_profile: true,
-        user_roles: {
-          select: {
-            id: true,
-            role: {
-              select: {
-                id: true,
-                name: true,
-             },
-           },
-         },
-       },
-     },
-   });
+  const user = await this.prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      username: true,
+      account_status: true,
+      email_verified_at: true,
+      created_at: true,
+      updated_at: true,
+      player_profile: true,
+      user_roles: {
+        select: {
+          id: true,
+          role: {
+            select: {
+              id: true,
+              name: true,
+              role_permissions: {
+                select: {
+                  permission: {
+                    select: {
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
 
-   if (!user) {
+  if (!user) {
     throw new NotFoundException('User not found');
-   }
-
-   return user;
   }
-  
 
+  const permissions = Array.from(
+    new Set(
+      user.user_roles.flatMap((userRole) =>
+        userRole.role.role_permissions.map(
+          (rolePermission) => rolePermission.permission.name,
+        ),
+      ),
+    ),
+  );
+
+  return {
+    ...user,
+    permissions,
+  };
+}
   async getUser(id: string) {
   const user = await this.prisma.user.findUnique({
     where: { id },
