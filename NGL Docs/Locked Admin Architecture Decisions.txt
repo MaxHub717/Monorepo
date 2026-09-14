@@ -1,0 +1,863 @@
+Locked Admin Architecture Decisions v1
+
+**Product:** NexGen Esport League System
+**System:** Admin / Management
+**Version:** v1.0
+**Status:** LOCKED
+**Purpose:** Establish the architectural decisions that must govern Admin-system implementation.
+
+---
+
+# 1. Decision Status
+
+The following four previously unresolved architectural areas are now locked:
+
+| Decision                  | Status    |
+| ------------------------- | --------- |
+| League architecture       | 🔒 Locked |
+| Scheduling architecture   | 🔒 Locked |
+| Administrative exceptions | 🔒 Locked |
+| Playoff architecture      | 🔒 Locked |
+
+These decisions are implementation constraints.
+
+They should not be casually changed during feature development.
+
+If a future requirement conflicts with one of these decisions, the conflict must be explicitly reviewed and the architecture document versioned rather than silently changing implementation behavior.
+
+---
+
+# 2. League Architecture
+
+## 2.1 Decision
+
+**A League is a permanent competitive organization/container.**
+
+**A Season is a time-bounded competitive edition of a League.**
+
+The relationship is:
+
+```text
+Platform
+   │
+   ├── League
+   │      │
+   │      ├── Season
+   │      │     ├── Divisions
+   │      │     ├── Participants
+   │      │     ├── Fixtures
+   │      │     ├── Matches
+   │      │     ├── Results
+   │      │     ├── Standings
+   │      │     └── Playoffs
+   │      │
+   │      └── Season
+   │
+   └── League
+```
+
+---
+
+## 2.2 NGL Professional
+
+**NGL Professional is a League.**
+
+It is not a Season.
+
+Example:
+
+```text
+NexGen Esport Platform
+        │
+        └── NGL Professional
+              │
+              ├── Season 1
+              ├── Season 2
+              ├── Season 3
+              └── ...
+```
+
+This allows the platform to preserve the identity and history of the league across multiple seasons.
+
+---
+
+## 2.3 League Responsibilities
+
+The League owns long-term information such as:
+
+* league identity
+* league name
+* description
+* competition identity
+* operating scope
+* league-level rules
+* assigned operators
+* league history
+
+The Season owns time-bound competition information.
+
+---
+
+## 2.4 Season Responsibilities
+
+A Season owns:
+
+* dates
+* registration
+* participants
+* divisions
+* fixtures
+* matches
+* results
+* standings
+* disputes
+* penalties
+* playoffs
+* completion state
+* archival state
+
+### Rule
+
+A season must belong to exactly one League.
+
+---
+
+# 3. Scheduling Architecture
+
+## 3.1 Decision
+
+NGL uses a:
+
+> **Hybrid Round + Match Window scheduling model.**
+
+The system will use structured competition rounds while allowing individual fixtures to be distributed within configurable match windows.
+
+---
+
+## 3.2 Round Structure
+
+The fixture engine generates the competition according to the selected competition format.
+
+For example:
+
+```text
+Division
+   │
+   ├── Round 1
+   │     ├── Fixture A
+   │     ├── Fixture B
+   │     └── ...
+   │
+   ├── Round 2
+   │     ├── Fixture A
+   │     ├── Fixture B
+   │     └── ...
+   │
+   └── Round N
+```
+
+The round is a competition structure.
+
+It is **not automatically a calendar week**.
+
+---
+
+## 3.3 Match Windows
+
+Each round may have a configurable operational window.
+
+For example:
+
+```text
+Round 1
+Match Window:
+Monday 08:00
+        ↓
+Sunday 23:59
+
+Fixtures may be scheduled inside the window.
+```
+
+The actual duration and scheduling policy must be configured according to the competition rules.
+
+---
+
+## 3.4 No Hidden Scheduling Assumptions
+
+The platform must not assume:
+
+* one round = one week
+* one player = one match per week
+* every fixture happens simultaneously
+* all fixtures have identical scheduled times
+
+Those are configuration decisions.
+
+---
+
+## 3.5 Fixture Lifecycle
+
+The scheduling system therefore separates:
+
+```text
+Competition structure
+        ↓
+Round generation
+        ↓
+Fixture generation
+        ↓
+Match-window assignment
+        ↓
+Schedule review
+        ↓
+Competition activation
+```
+
+---
+
+## 3.6 Administrative Scheduling
+
+Authorized Admin personnel may be able to:
+
+* review generated fixtures
+* assign scheduled times
+* reschedule fixtures
+* identify conflicts
+* cancel/void fixtures where policy permits
+
+Sensitive scheduling changes must be audited.
+
+---
+
+## 3.7 Scheduling Lock
+
+Once competition operations reach the appropriate locked state, normal scheduling changes must be restricted.
+
+Changes after activation should use the administrative exception mechanism defined below.
+
+---
+
+# 4. Administrative Exception Architecture
+
+## 4.1 Decision
+
+Administrative exceptions are:
+
+> **Controlled, permission-based, auditable interventions into normal competition operations.**
+
+They are not unrestricted database edits.
+
+---
+
+## 4.2 Core Principle
+
+An administrator must never silently overwrite competition history.
+
+Instead:
+
+```text
+Normal State
+     ↓
+Exception Request / Action
+     ↓
+Validation
+     ↓
+Authorized Decision
+     ↓
+State Change
+     ↓
+Audit Record
+```
+
+---
+
+## 4.3 Exception Authority
+
+Authority is based on:
+
+1. role
+2. permission
+3. operational scope
+4. affected entity
+5. competition state
+
+Having a role alone does not automatically grant every exception capability.
+
+---
+
+## 4.4 Authority Model
+
+Initial authority model:
+
+| Operation                            | Operator | Commissioner | HQ Admin |
+| ------------------------------------ | -------: | -----------: | -------: |
+| Monitor operational issue            |        ✅ |            ✅ |        ✅ |
+| Manage normal match operations       |        ✅ |            ✅ |        ✅ |
+| Review result                        |        ✅ |            ✅ |        ✅ |
+| Resolve assigned operational dispute |       ⚠️ |            ✅ |        ✅ |
+| Apply penalty                        |       ⚠️ |            ✅ |        ✅ |
+| Change locked roster                 |        ❌ |           ⚠️ |        ✅ |
+| Correct confirmed result             |        ❌ |           ⚠️ |        ✅ |
+| Change locked fixture                |       ⚠️ |            ✅ |        ✅ |
+| Override competition state           |        ❌ |   ⚠️ limited |        ✅ |
+
+`⚠️` means the capability is controlled by explicit permission/scope and may require an appropriate workflow.
+
+---
+
+# 5. Exception Categories
+
+The system should recognize administrative exceptions such as:
+
+### Participant exceptions
+
+* administrative withdrawal
+* roster correction
+* eligibility correction
+* authorized participant replacement where competition rules permit
+
+### Fixture exceptions
+
+* rescheduling
+* cancellation
+* voiding
+* schedule correction
+
+### Match exceptions
+
+* no-show
+* forfeit
+* cancellation
+* void
+* reopening
+* administrative state correction
+
+### Result exceptions
+
+* rejected result
+* result correction
+* evidence-based result decision
+* administrative override
+
+### Competition exceptions
+
+* state correction
+* playoff qualification correction
+* bracket correction
+
+---
+
+# 6. Exception Audit Requirements
+
+Sensitive exceptions must capture:
+
+```text
+Actor
+Action
+Entity
+Entity ID
+Previous State
+New State
+Reason
+Evidence / Metadata where applicable
+Timestamp
+```
+
+The audit record must remain available after the season is completed and archived.
+
+---
+
+# 7. Result Correction Rule
+
+A confirmed official result must never be treated as disposable data.
+
+Example:
+
+```text
+Original official result:
+Player A 3 — 1 Player B
+
+Administrative correction:
+Player A 2 — 1 Player B
+
+Audit:
+WHO → Admin
+WHAT → Result correction
+WHY → Verified evidence
+WHEN → Timestamp
+```
+
+The system preserves the history of the intervention.
+
+The corrected result becomes the current official result.
+
+Standings then recalculate from the corrected official result.
+
+---
+
+# 8. Playoff Architecture
+
+## 8.1 Decision
+
+NGL Professional MVP uses a:
+
+> **Top-4 playoff system.**
+
+The regular season determines the four qualifiers.
+
+---
+
+## 8.2 Qualification
+
+After the regular season:
+
+```text
+Official Standings
+       ↓
+1st
+2nd
+3rd
+4th
+       ↓
+Playoff Qualification
+```
+
+Only official regular-season standings may determine qualification.
+
+---
+
+# 9. Playoff Seeding
+
+The semifinal structure is:
+
+```text
+Semi-final 1
+1st vs 4th
+
+Semi-final 2
+2nd vs 3rd
+```
+
+This produces:
+
+```text
+1st ───────┐
+            ├── Finalist
+4th ───────┘
+
+
+2nd ───────┐
+            ├── Finalist
+3rd ───────┘
+```
+
+---
+
+# 10. Final
+
+The two semifinal winners advance to:
+
+```text
+FINAL
+  ↓
+CHAMPION
+```
+
+The system must record the final winner as the season champion.
+
+---
+
+# 11. Playoff Bracket Lock
+
+The playoff bracket must be locked before playoff matches begin.
+
+After locking:
+
+* qualification cannot be casually changed
+* seeding cannot be casually changed
+* semifinal pairing cannot be casually changed
+* bracket structure cannot be casually changed
+
+Any necessary correction must use the administrative exception mechanism.
+
+---
+
+# 12. Playoff State Model
+
+The intended operational progression is:
+
+```text
+REGULAR SEASON
+      ↓
+QUALIFICATION
+      ↓
+SEEDING
+      ↓
+BRACKET GENERATED
+      ↓
+BRACKET REVIEWED
+      ↓
+BRACKET LOCKED
+      ↓
+SEMIFINALS
+      ↓
+FINAL
+      ↓
+CHAMPION
+      ↓
+SEASON COMPLETED
+```
+
+---
+
+# 13. Playoff Data Ownership
+
+Regular-season standings remain the source of qualification.
+
+The playoff system then creates its own playoff structure from that qualification data.
+
+Conceptually:
+
+```text
+Regular Season
+      │
+      ▼
+Official Standings
+      │
+      ▼
+Qualified Players
+      │
+      ▼
+Seeds
+      │
+      ▼
+Playoff Bracket
+      │
+      ▼
+Playoff Matches
+      │
+      ▼
+Champion
+```
+
+---
+
+# 14. Competition Integrity Rules
+
+These four architectural decisions establish several important integrity rules.
+
+## Rule 1 — League identity persists
+
+A completed season does not destroy the League.
+
+---
+
+## Rule 2 — Competition history is preserved
+
+Administrative correction does not erase the historical action.
+
+---
+
+## Rule 3 — Official results drive standings
+
+Standings derive from confirmed/corrected official results.
+
+---
+
+## Rule 4 — Playoffs derive from official standings
+
+Playoff qualification is not manually selected by an administrator under normal circumstances.
+
+---
+
+## Rule 5 — Locked structures require controlled intervention
+
+Roster, schedule, official results, and playoff brackets become increasingly protected as the competition progresses.
+
+---
+
+# 15. Resulting Domain Structure
+
+The Admin architecture should evolve toward:
+
+```text
+Platform
+│
+├── Users
+├── Roles
+├── Permissions
+└── Audit
+│
+▼
+League
+│
+├── Configuration
+├── Operators
+│
+└── Seasons
+      │
+      ├── Configuration
+      │
+      ├── Registration
+      │
+      ├── Participants
+      │
+      ├── Roster
+      │
+      ├── Rounds
+      │
+      ├── Fixtures
+      │
+      ├── Matches
+      │
+      ├── Results
+      │
+      ├── Standings
+      │
+      ├── Playoffs
+      │
+      ├── Disputes
+      │
+      ├── Penalties
+      │
+      └── Audit
+```
+
+---
+
+# 16. Admin Operating Model
+
+The resulting Admin workflow is:
+
+```text
+LOGIN
+  ↓
+ADMIN DASHBOARD
+  ↓
+SELECT LEAGUE
+  ↓
+CREATE / SELECT SEASON
+  ↓
+CONFIGURE
+  ↓
+OPEN REGISTRATION
+  ↓
+MANAGE PARTICIPANTS
+  ↓
+CLOSE REGISTRATION
+  ↓
+REVIEW ROSTER
+  ↓
+LOCK ROSTER
+  ↓
+GENERATE ROUNDS + FIXTURES
+  ↓
+ASSIGN / REVIEW MATCH WINDOWS
+  ↓
+APPROVE SCHEDULE
+  ↓
+ACTIVATE SEASON
+  ↓
+OPERATE MATCHES
+  ↓
+VERIFY RESULTS
+  ↓
+UPDATE OFFICIAL STANDINGS
+  ↓
+RESOLVE EXCEPTIONS
+  ↓
+QUALIFY TOP 4
+  ↓
+GENERATE PLAYOFF BRACKET
+  ↓
+LOCK BRACKET
+  ↓
+RUN SEMIFINALS
+  ↓
+RUN FINAL
+  ↓
+DECLARE CHAMPION
+  ↓
+COMPLETE SEASON
+  ↓
+ARCHIVE
+```
+
+---
+
+# 17. Implementation Consequences
+
+These decisions create mandatory technical consequences.
+
+## League
+
+The data model must eventually introduce a first-class League entity and associate seasons with it.
+
+---
+
+## Scheduling
+
+The data model must distinguish:
+
+* competition round
+* fixture
+* match
+* scheduled time
+* match window
+
+A `MatchWeek` entity may be retained or renamed/restructured if it represents the round/window concept correctly.
+
+---
+
+## Exceptions
+
+The system must support auditable administrative actions rather than unrestricted mutation of locked competition entities.
+
+---
+
+## Playoffs
+
+The data model requires a proper playoff domain.
+
+A simple:
+
+```text
+Season.status = PLAYOFFS
+```
+
+is insufficient.
+
+The system needs explicit playoff entities/state sufficient to represent:
+
+* qualifiers
+* seeds
+* bracket
+* bracket lock
+* semifinal matches
+* final
+* champion
+
+---
+
+# 18. Impact on Current Implementation
+
+The current backend foundation remains useful.
+
+The following can be retained conceptually:
+
+* Season lifecycle
+* Division
+* DivisionParticipant
+* Fixture
+* Match
+* MatchParticipant
+* MatchResult
+* StandingsRow
+* AuditLog
+* Outbox events
+* RBAC foundation
+
+However, several areas must evolve:
+
+### Required architectural evolution
+
+1. Introduce League domain.
+2. Reconcile `MatchWeek` with the locked round/match-window model.
+3. Expand fixture management beyond generation.
+4. Complete match lifecycle operations.
+5. Introduce controlled administrative exceptions.
+6. Build complete result correction workflow.
+7. Build playoff domain.
+8. Build Admin season workspace around these domains.
+
+---
+
+# 19. Implementation Guardrails
+
+During implementation:
+
+### Do not
+
+* bypass the League layer
+* treat NGL Professional as a Season
+* equate rounds with weeks without configuration
+* hard-code one match per player per week
+* directly overwrite locked competition records
+* treat the PLAYOFFS season status as a playoff subsystem
+* manually edit standings as the normal correction mechanism
+* allow UI-only authorization
+
+### Do
+
+* enforce rules at the service/API layer
+* preserve competition history
+* audit sensitive changes
+* use official results as standings input
+* derive playoff qualification from official standings
+* make competition state drive available Admin actions
+
+---
+
+# 20. Architecture Gate
+
+The following four questions are now considered resolved for Admin-system implementation:
+
+### League
+
+**Permanent League → multiple time-bounded Seasons.**
+
+### Scheduling
+
+**Hybrid rounds + configurable match windows.**
+
+### Exceptions
+
+**Permission-controlled, scope-controlled, auditable administrative interventions.**
+
+### Playoffs
+
+**Top 4 → 1v4 / 2v3 semifinals → Final → Champion, with bracket lock.**
+
+These decisions constitute the architectural gate between the Admin audit and implementation planning.
+
+---
+
+# 21. Next Step
+
+With these decisions locked, the project can move from:
+
+```text
+AUDIT
+  ↓
+ARCHITECTURE
+  ↓
+IMPLEMENTATION BACKLOG
+```
+
+The next artifact should be:
+
+**Admin System Implementation Backlog v1**
+
+It will translate the Gap Matrix and these locked architectural decisions into:
+
+* Epics
+* Features
+* Stories
+* technical tasks
+* dependencies
+* acceptance criteria
+* implementation order
+
+The backlog should be structured so that each phase produces a working piece of the Admin operating system rather than a collection of disconnected pages.
+
+---
+
+# 22. Governance
+
+This document is now the authoritative architectural decision record for the four previously unresolved Admin areas.
+
+Any implementation that conflicts with these decisions must stop and trigger an architecture review.
+
+Changes require a new version.
+
+**Current version: v1.0 — LOCKED**

@@ -1,0 +1,1698 @@
+Implementation Roadmap Backlog v1
+
+**Product:** NexGen Esport League System
+**System:** Admin / Management
+**Version:** v1.0
+**Status:** Implementation Ready
+**Architecture:** Based on Locked Admin Architecture Decisions v1
+**Source:** Admin System Specification v1 + Admin System Gap Matrix v1
+
+---
+
+# 1. Backlog Objective
+
+This backlog converts the Admin System Specification and Gap Matrix into executable engineering work.
+
+The objective is not to build a collection of Admin pages.
+
+The objective is to build a functioning:
+
+> **League Operations System**
+
+capable of taking an authorized administrator from creating a league through running a season and declaring its champion.
+
+---
+
+# 2. Primary Definition of Done
+
+The Admin MVP is complete when an authorized administrator can execute:
+
+```text
+Login
+↓
+Create League
+↓
+Create Season
+↓
+Configure Competition
+↓
+Open Registration
+↓
+Manage Participants
+↓
+Close Registration
+↓
+Review Roster
+↓
+Lock Roster
+↓
+Generate Schedule
+↓
+Review / Adjust Schedule
+↓
+Activate Season
+↓
+Operate Matches
+↓
+Review Results
+↓
+Resolve Exceptions
+↓
+Maintain Official Standings
+↓
+Qualify Top 4
+↓
+Generate Playoff Bracket
+↓
+Lock Bracket
+↓
+Run Semifinals
+↓
+Run Final
+↓
+Declare Champion
+↓
+Complete Season
+↓
+Archive
+```
+
+Every sensitive operation must be:
+
+* authorized
+* validated
+* auditable
+* state-aware
+* transactionally safe where required
+
+---
+
+# 3. Backlog Priority
+
+| Priority | Meaning                                   |
+| -------- | ----------------------------------------- |
+| P0       | Required for the Admin MVP operating loop |
+| P1       | Important supporting capability           |
+| P2       | Enhancement / future capability           |
+
+---
+
+# 4. Dependency Strategy
+
+The implementation follows:
+
+```text
+Foundation
+    ↓
+League
+    ↓
+Season Workspace
+    ↓
+Configuration
+    ↓
+Registration
+    ↓
+Roster
+    ↓
+Scheduling
+    ↓
+Matches
+    ↓
+Results
+    ↓
+Standings
+    ↓
+Playoffs
+    ↓
+Completion
+    ↓
+Governance / Hardening
+```
+
+Cross-cutting:
+
+```text
+RBAC
+Audit
+Notifications
+Error handling
+Transactions
+```
+
+must support the appropriate stages rather than being treated as isolated cosmetic features.
+
+---
+
+# EPIC A — Admin Foundation
+
+**Priority: P0**
+
+Build the operational Admin shell and establish the foundation for all management workflows.
+
+---
+
+## A1 — Admin Application Shell
+
+### Story
+
+As an authorized administrator, I need a dedicated Admin workspace so that I can navigate league operations from one place.
+
+### Tickets
+
+* Create Admin layout
+* Create Admin navigation
+* Create protected Admin route group
+* Add active navigation state
+* Add responsive layout
+* Add authenticated user context
+* Add logout control
+* Add role/permission-aware navigation
+
+### Acceptance Criteria
+
+* Unauthorized users cannot access Admin routes.
+* Authorized users see only permitted operations.
+* Navigation groups reflect the Admin architecture.
+* Navigation does not expose actions the user cannot perform.
+
+---
+
+## A2 — Admin Dashboard
+
+### Story
+
+As an administrator, I need an operational dashboard showing what requires attention.
+
+### Tickets
+
+* Active seasons summary
+* Registration status summary
+* Pending results
+* Active matches
+* Open disputes
+* Active penalties
+* Operational alerts
+* Quick actions
+* Recent administrative activity
+
+### Acceptance Criteria
+
+Dashboard answers:
+
+* What is running?
+* What needs attention?
+* What action should I take next?
+
+---
+
+## A3 — Authorization Hardening
+
+### Tickets
+
+* Review Admin route guards
+* Review API permission guards
+* Verify service-layer authorization
+* Verify operator scope enforcement
+* Verify Commissioner authority
+* Verify HQ Admin authority
+* Add authorization tests for sensitive operations
+
+### Acceptance Criteria
+
+Authorization cannot be bypassed by directly calling APIs.
+
+---
+
+# EPIC B — League Management
+
+**Priority: P0**
+
+Introduce the permanent League layer.
+
+---
+
+## B1 — League Domain
+
+### Tickets
+
+* Create League Prisma model
+* Add League status
+* Add League metadata
+* Add Season → League relationship
+* Add league timestamps
+* Add appropriate indexes/constraints
+* Update Prisma relations
+
+### Acceptance Criteria
+
+A season cannot exist without a valid league association once the new architecture is active.
+
+---
+
+## B2 — League API
+
+### Tickets
+
+* Create League DTO
+* Create League service
+* Create League controller
+* Create league
+* List leagues
+* Get league
+* Update league
+* Activate/deactivate where required
+* Validate league state
+
+### Acceptance Criteria
+
+Authorized Admin can manage leagues without direct database access.
+
+---
+
+## B3 — League Operators
+
+### Tickets
+
+* Define league/operator relationship
+* Assign operator to league
+* Remove operator
+* List assigned operators
+* Validate operator authority scope
+
+### Acceptance Criteria
+
+Operators can only operate within their assigned authority.
+
+---
+
+## B4 — League UI
+
+### Tickets
+
+* League list
+* Create league form
+* League overview
+* League settings
+* Operators panel
+* Seasons list
+
+### Acceptance Criteria
+
+Admin can create and enter a League workspace entirely through the UI.
+
+---
+
+# EPIC C — Season Workspace
+
+**Priority: P0**
+
+Replace the current basic Seasons list with a real operational Season workspace.
+
+---
+
+## C1 — Season Creation
+
+### Tickets
+
+* Create season form
+* League selector
+* Season dates
+* Description
+* Initial configuration
+* Validation messages
+* Create-season API integration
+
+### Acceptance Criteria
+
+Admin can create a season in `DRAFT`.
+
+---
+
+## C2 — Season Overview
+
+### Tickets
+
+* Season header
+* Status indicator
+* Competition stage
+* Dates
+* Participant count
+* Division count
+* Fixture count
+* Match count
+* Pending result count
+* Dispute count
+* Penalty count
+* Primary next action
+
+### Acceptance Criteria
+
+Admin can understand the current season state without opening multiple pages.
+
+---
+
+## C3 — Season State Machine UI
+
+### Tickets
+
+* Implement state-aware actions
+* Display transition requirements
+* Disable invalid actions
+* Confirm destructive transitions
+* Display transition errors
+
+### Acceptance Criteria
+
+The UI never presents an obviously invalid lifecycle action.
+
+---
+
+# EPIC D — Season Configuration
+
+**Priority: P0**
+
+Build the configuration system that defines how a season operates.
+
+---
+
+## D1 — Season Configuration
+
+### Tickets
+
+* Season dates
+* Registration window
+* Competition format
+* Match configuration
+* Scheduling configuration
+* Playoff configuration
+* Participation rules
+
+### Acceptance Criteria
+
+Admin can configure competition before registration opens.
+
+---
+
+## D2 — Division Management
+
+### Tickets
+
+* Division list
+* Create division
+* Edit division
+* Set division type
+* Set competition format
+* Set capacity
+* Activate/deactivate division
+* Validate division configuration
+
+### Acceptance Criteria
+
+Admin can fully configure active competition divisions before roster lock.
+
+---
+
+## D3 — Configuration Locking
+
+### Tickets
+
+* Identify mutable configuration
+* Identify protected configuration
+* Prevent prohibited changes after roster lock
+* Prevent prohibited changes after activation
+* Add administrative exception path
+
+### Acceptance Criteria
+
+Competition structure cannot be casually changed after participants/fixtures depend on it.
+
+---
+
+# EPIC E — Registration & Participant Management
+
+**Priority: P0**
+
+Build the Admin-controlled registration workflow.
+
+---
+
+## E1 — Registration Control
+
+### Tickets
+
+* Open registration
+* Display registration window
+* Display registration status
+* Close registration
+* Validate registration state
+* Registration metrics
+
+### Acceptance Criteria
+
+Admin can open and close registration through the UI.
+
+---
+
+## E2 — Participant Workspace
+
+### Tickets
+
+* Participant list
+* Search
+* Filters
+* Player information
+* Registration timestamp
+* Division
+* Status
+* Seed
+* Participation history
+
+### Acceptance Criteria
+
+Admin can review every participant before roster lock.
+
+---
+
+## E3 — Administrative Participant Actions
+
+### Tickets
+
+* Admin withdrawal
+* Withdrawal reason
+* Eligibility correction
+* Authorized override
+* Audit event
+* Permission enforcement
+
+### Acceptance Criteria
+
+Administrative participant changes are distinguishable from normal player actions and are auditable.
+
+---
+
+## E4 — Roster Review
+
+### Tickets
+
+* Final participant count
+* Division breakdown
+* Eligibility validation
+* Duplicate validation
+* Capacity validation
+* Roster readiness indicator
+
+### Acceptance Criteria
+
+Admin receives a clear indication of whether the season is ready for roster lock.
+
+---
+
+# EPIC F — Roster Lock
+
+**Priority: P0**
+
+Formalize roster lock as an operational milestone.
+
+---
+
+## F1 — Roster Lock API
+
+### Tickets
+
+* Validate season state
+* Validate active divisions
+* Validate minimum participants
+* Lock participant state
+* Prevent normal roster modifications
+* Audit lock action
+* Emit domain event
+
+---
+
+## F2 — Roster Lock UI
+
+### Tickets
+
+* Roster readiness indicator
+* Lock roster action
+* Confirmation dialog
+* Validation errors
+* Locked-state display
+
+### Acceptance Criteria
+
+Once locked:
+
+* normal registration stops
+* roster is treated as fixed
+* fixture generation becomes available
+* protected configuration becomes immutable
+
+---
+
+# EPIC G — Scheduling & Fixture Management
+
+**Priority: P0**
+
+Turn fixture generation into a complete scheduling system.
+
+---
+
+## G1 — Competition Round Model
+
+### Tickets
+
+* Review MatchWeek model
+* Define round semantics
+* Define match-window semantics
+* Add required scheduling metadata
+* Add round indexes
+
+### Acceptance Criteria
+
+The model clearly distinguishes:
+
+```text
+Round
+Match Window
+Fixture
+Match
+```
+
+A round is not automatically a calendar week.
+
+---
+
+## G2 — Fixture Generation
+
+### Existing foundation
+
+Retain and integrate:
+
+* single round robin
+* double round robin
+* deterministic ordering
+* MatchWeek creation
+* Fixture creation
+* Match creation
+
+### Tickets
+
+* Move generation into Admin workflow
+* Add generation readiness validation
+* Add generation result summary
+* Audit generation
+* Prevent unsafe duplicate generation
+
+---
+
+## G3 — Fixture Review
+
+### Tickets
+
+* Fixture list
+* Filter by round
+* Filter by player
+* Filter by status
+* Schedule display
+* Match-window display
+* Conflict indicators
+
+### Acceptance Criteria
+
+Admin can review the complete generated schedule before activation.
+
+---
+
+## G4 — Fixture Scheduling
+
+### Tickets
+
+* Assign scheduled time
+* Edit scheduled time
+* Validate match window
+* Detect scheduling conflicts
+* Reschedule fixture
+* Audit schedule changes
+
+### Acceptance Criteria
+
+Authorized Admin can adjust fixtures within defined scheduling rules.
+
+---
+
+## G5 — Fixture Exceptions
+
+### Tickets
+
+* Cancel fixture
+* Void fixture
+* Record reason
+* Restrict unauthorized operations
+* Preserve history
+
+---
+
+# EPIC H — Match Operations
+
+**Priority: P0**
+
+Build the operational match control system.
+
+---
+
+## H1 — Match Queue
+
+### Tickets
+
+* Upcoming matches
+* Active matches
+* Awaiting results
+* Disputed matches
+* Completed matches
+* Match filters
+
+---
+
+## H2 — Match Lifecycle
+
+Implement:
+
+```text
+SCHEDULED
+↓
+CHECK_IN_OPEN
+↓
+IN_PROGRESS
+↓
+RESULT_SUBMITTED
+↓
+CONFIRMED
+↓
+COMPLETED
+```
+
+### Tickets
+
+* Open check-in
+* Start match
+* Complete match
+* Validate state transitions
+* State transition audit
+
+---
+
+## H3 — Match Exceptions
+
+### Tickets
+
+* No-show
+* Forfeit
+* Cancel
+* Void
+* Disputed
+* Administrative correction
+
+### Acceptance Criteria
+
+Exceptional match outcomes are explicit states/actions rather than arbitrary database edits.
+
+---
+
+# EPIC I — Result Management
+
+**Priority: P0**
+
+Create the official result-verification workflow.
+
+---
+
+## I1 — Result Queue
+
+### Tickets
+
+* Pending results
+* Result details
+* Submitting player
+* Opponent
+* Submission timestamp
+* Evidence
+* Confirmation status
+
+---
+
+## I2 — Result Confirmation
+
+### Tickets
+
+* Confirm result
+* Validate authorization
+* Record confirmation
+* Update match state
+* Trigger standings recalculation/update
+* Audit
+
+---
+
+## I3 — Result Rejection
+
+### Tickets
+
+* Reject result
+* Capture reason
+* Notify participants
+* Reopen appropriate workflow
+* Preserve submission history
+
+---
+
+## I4 — Result Correction
+
+### Tickets
+
+* Correct official result
+* Require authorized permission
+* Require reason
+* Preserve previous result
+* Record correction audit
+* Recalculate standings
+
+### Acceptance Criteria
+
+Official competition history remains reconstructable after correction.
+
+---
+
+# EPIC J — Standings
+
+**Priority: P0**
+
+Make official standings an operational competition view.
+
+---
+
+## J1 — Standings Calculation
+
+### Tickets
+
+* Confirm standings source
+* Confirm points rules
+* Confirm tie-break rules
+* Recalculate after official result
+* Validate standings integrity
+
+---
+
+## J2 — Admin Standings Workspace
+
+### Tickets
+
+* Division standings
+* Player records
+* Wins/losses
+* Points
+* Tie-break data
+* Ranking position
+* Qualification indicator
+
+---
+
+## J3 — Standings Integrity
+
+### Rule
+
+Admin does not normally edit standings directly.
+
+Corrections occur through:
+
+```text
+Official result correction
+        ↓
+Standings recalculation
+```
+
+---
+
+# EPIC K — Disputes & Penalties
+
+**Priority: P0**
+
+Build competition exception resolution.
+
+---
+
+## K1 — Dispute Queue
+
+### Tickets
+
+* List disputes
+* Filters
+* Status
+* Match context
+* Player context
+* Evidence
+* Submitted result
+* Timeline
+
+---
+
+## K2 — Dispute Resolution
+
+### Tickets
+
+* Update dispute status API
+* Review workflow
+* Decision recording
+* Resolution recording
+* Player notification
+* Audit
+
+---
+
+## K3 — Penalty Management
+
+### Tickets
+
+* Penalty list
+* Create penalty
+* Penalty detail
+* Apply penalty
+* Change penalty status
+* Revoke/correct penalty
+* Reason
+* Competition impact
+* Audit
+
+---
+
+# EPIC L — Playoff System
+
+**Priority: P0**
+
+Build the actual playoff domain rather than merely changing Season status to `PLAYOFFS`.
+
+---
+
+## L1 — Qualification
+
+### Tickets
+
+* Determine Top 4
+* Validate official standings
+* Freeze qualification snapshot
+* Record qualifiers
+
+---
+
+## L2 — Seeding
+
+### Tickets
+
+* Seed 1st
+* Seed 2nd
+* Seed 3rd
+* Seed 4th
+* Generate pairings
+
+Expected:
+
+```text
+1st vs 4th
+2nd vs 3rd
+```
+
+---
+
+## L3 — Playoff Bracket
+
+### Tickets
+
+* Playoff model
+* Bracket model
+* Semifinal nodes
+* Final node
+* Participant advancement
+* Bracket status
+
+---
+
+## L4 — Bracket Review
+
+### Tickets
+
+* Display bracket
+* Display qualifiers
+* Display seeds
+* Validate bracket
+* Admin approval
+
+---
+
+## L5 — Bracket Lock
+
+### Tickets
+
+* Lock bracket
+* Prevent normal structural changes
+* Audit lock
+* Exception pathway
+
+---
+
+## L6 — Playoff Matches
+
+### Tickets
+
+* Create semifinal matches
+* Manage semifinal lifecycle
+* Record semifinal results
+* Advance winners
+* Create final
+* Record final result
+* Declare champion
+
+---
+
+## L7 — Champion Declaration
+
+### Acceptance Criteria
+
+The system must produce an explicit season champion based on the official final result.
+
+---
+
+# EPIC M — Season Completion & Archive
+
+**Priority: P0**
+
+---
+
+## M1 — Season Completion
+
+### Tickets
+
+Validate:
+
+* regular competition complete
+* playoff complete where applicable
+* champion determined
+* outstanding critical disputes resolved
+* required penalties processed
+
+---
+
+## M2 — Archive
+
+### Tickets
+
+* Archive season
+* Preserve read-only history
+* Prevent normal mutations
+* Maintain audit access
+* Preserve standings
+* Preserve results
+* Preserve playoff bracket
+
+---
+
+# EPIC N — Audit & Governance
+
+**Priority: P1**
+
+---
+
+## N1 — Audit Viewer
+
+### Tickets
+
+* Audit list
+* Filter by actor
+* Filter by action
+* Filter by entity
+* Filter by season
+* Filter by date
+* Entity history
+
+---
+
+## N2 — Sensitive Action Audit
+
+Ensure audit coverage for:
+
+* participant overrides
+* roster lock
+* fixture generation
+* fixture changes
+* match state changes
+* result confirmation
+* result correction
+* dispute resolution
+* penalty changes
+* bracket lock
+* champion declaration
+* season lifecycle changes
+* RBAC changes
+
+---
+
+# EPIC O — Notifications
+
+**Priority: P1**
+
+Notifications support Admin operations but should not block the core domain implementation.
+
+---
+
+## O1 — Operational Notifications
+
+Potential events:
+
+```text
+Registration opened
+Registration closed
+Roster locked
+Fixtures generated
+Match approaching
+Result submitted
+Result disputed
+Result confirmed
+Penalty applied
+Playoffs started
+Final scheduled
+Champion declared
+```
+
+Channels:
+
+* in-app
+* email
+* web push where appropriate
+
+---
+
+# EPIC P — Error Handling & Operational Hardening
+
+**Priority: P0/P1**
+
+---
+
+## P1 — Domain Error Standardization
+
+### Tickets
+
+Create consistent errors for:
+
+* invalid transition
+* insufficient participants
+* invalid division
+* locked roster
+* missing fixtures
+* invalid result
+* unauthorized exception
+* playoff qualification failure
+* bracket lock violation
+
+---
+
+## P2 — Transaction Safety
+
+Review critical operations:
+
+* registration
+* participant withdrawal
+* roster lock
+* fixture generation
+* result confirmation
+* result correction
+* dispute resolution
+* penalty application
+* playoff generation
+
+---
+
+# 5. Implementation Phases
+
+The backlog should be executed in these phases.
+
+---
+
+## Phase 1 — Admin Foundation
+
+Deliver:
+
+```text
+Admin Shell
+Authorization
+Dashboard
+```
+
+**Goal:** Admin has a real operational workspace.
+
+---
+
+## Phase 2 — League & Season
+
+Deliver:
+
+```text
+League
+Season
+Season Workspace
+Lifecycle
+```
+
+**Goal:** Admin can create and manage the competition container.
+
+---
+
+## Phase 3 — Configuration
+
+Deliver:
+
+```text
+Season Configuration
+Divisions
+Scheduling Configuration
+```
+
+**Goal:** Admin can define how the competition operates.
+
+---
+
+## Phase 4 — Registration & Roster
+
+Deliver:
+
+```text
+Registration
+Participants
+Roster Review
+Roster Lock
+```
+
+**Goal:** Admin can create the official competition roster.
+
+---
+
+## Phase 5 — Scheduling
+
+Deliver:
+
+```text
+Rounds
+Match Windows
+Fixture Generation
+Fixture Review
+Fixture Scheduling
+```
+
+**Goal:** Admin can produce and approve the competition schedule.
+
+---
+
+## Phase 6 — Match Operations
+
+Deliver:
+
+```text
+Match Queue
+Check-in
+Match Lifecycle
+Match Exceptions
+```
+
+**Goal:** Admin can operate actual matches.
+
+---
+
+## Phase 7 — Results & Standings
+
+Deliver:
+
+```text
+Result Queue
+Confirmation
+Rejection
+Correction
+Standings
+```
+
+**Goal:** Competition results become official and standings become trustworthy.
+
+---
+
+## Phase 8 — Competition Resolution
+
+Deliver:
+
+```text
+Disputes
+Penalties
+Administrative Exceptions
+```
+
+**Goal:** Admin can handle real-world competition problems.
+
+---
+
+## Phase 9 — Playoffs
+
+Deliver:
+
+```text
+Top 4 Qualification
+Seeding
+Bracket
+Bracket Lock
+Semifinals
+Final
+Champion
+```
+
+**Goal:** The complete NGL Professional competition can finish.
+
+---
+
+## Phase 10 — Governance & Hardening
+
+Deliver:
+
+```text
+Audit
+Notifications
+Error standardization
+Transaction review
+Security review
+End-to-end testing
+```
+
+---
+
+# 6. Critical Dependencies
+
+The following dependencies must be respected.
+
+```text
+League
+  ↓
+Season
+  ↓
+Configuration
+  ↓
+Registration
+  ↓
+Participants
+  ↓
+Roster Lock
+  ↓
+Scheduling
+  ↓
+Fixtures
+  ↓
+Matches
+  ↓
+Results
+  ↓
+Standings
+  ↓
+Playoff Qualification
+  ↓
+Bracket
+  ↓
+Playoff Matches
+  ↓
+Champion
+  ↓
+Completion
+```
+
+Cross-cutting:
+
+```text
+Authorization ─────────► all operations
+Audit ─────────────────► sensitive operations
+Notifications ─────────► operational events
+Transactions ──────────► critical mutations
+```
+
+---
+
+# 7. First Implementation Slice
+
+The first coding slice should **not** be the entire Admin system.
+
+The first vertical slice should prove:
+
+```text
+Admin Login
+   ↓
+Admin Dashboard
+   ↓
+League
+   ↓
+Season
+   ↓
+Season Workspace
+   ↓
+Create Season
+   ↓
+Configure Division
+   ↓
+Open Registration
+```
+
+This gives us a functioning Admin foundation while exposing any architectural problems early.
+
+---
+
+# 8. Second Implementation Slice
+
+The next vertical slice should prove:
+
+```text
+Registration
+   ↓
+Participants
+   ↓
+Close Registration
+   ↓
+Roster Review
+   ↓
+Roster Lock
+```
+
+At this point we have a real competition roster.
+
+---
+
+# 9. Third Implementation Slice
+
+Then:
+
+```text
+Roster Lock
+   ↓
+Generate Rounds
+   ↓
+Generate Fixtures
+   ↓
+Assign Match Windows
+   ↓
+Review Schedule
+```
+
+This validates the locked scheduling architecture.
+
+---
+
+# 10. Fourth Implementation Slice
+
+Then:
+
+```text
+Schedule
+   ↓
+Activate
+   ↓
+Match Operations
+   ↓
+Result Submission
+   ↓
+Result Confirmation
+   ↓
+Standings
+```
+
+This proves the regular-season competition engine.
+
+---
+
+# 11. Fifth Implementation Slice
+
+Then:
+
+```text
+Standings
+   ↓
+Top 4
+   ↓
+Seeding
+   ↓
+Bracket
+   ↓
+Bracket Lock
+   ↓
+Semifinals
+   ↓
+Final
+   ↓
+Champion
+```
+
+This proves the complete NGL Professional lifecycle.
+
+---
+
+# 12. Acceptance Test — Admin MVP
+
+The following scenario must eventually pass from a clean environment.
+
+### Setup
+
+Create:
+
+* one League
+* one Season
+* one Division
+* sufficient eligible players
+
+### Execute
+
+```text
+1. Login as authorized Admin
+2. Create League
+3. Create Season
+4. Configure Division
+5. Open Registration
+6. Register participants
+7. Close Registration
+8. Review participants
+9. Lock roster
+10. Generate fixtures
+11. Review schedule
+12. Assign match windows
+13. Activate season
+14. Operate matches
+15. Submit results
+16. Confirm results
+17. Verify standings
+18. Resolve an example dispute
+19. Apply an example penalty
+20. Qualify Top 4
+21. Generate bracket
+22. Lock bracket
+23. Run semifinals
+24. Run final
+25. Declare champion
+26. Complete season
+27. Archive season
+```
+
+### Expected result
+
+No developer/database intervention is required.
+
+---
+
+# 13. Technical Acceptance Criteria
+
+The implementation must demonstrate:
+
+### Security
+
+* API authorization enforced
+* role checks enforced
+* permission checks enforced
+* scope checks enforced
+* no client-side-only authorization
+
+### Data integrity
+
+* duplicate participants prevented
+* capacity constraints safe under concurrency
+* invalid lifecycle transitions rejected
+* locked entities protected
+* official results preserved
+* standings derived from official results
+
+### Competition integrity
+
+* deterministic fixture generation
+* correct round-robin pairing
+* schedule review before activation
+* playoff qualification derived from standings
+* bracket lock enforced
+* champion derived from final result
+
+### Governance
+
+* sensitive actions audited
+* corrections preserve history
+* administrative overrides require authority
+* archived seasons are protected
+
+---
+
+# 14. Backlog Completion Criteria
+
+The backlog is complete when:
+
+### Foundation
+
+* [ ] Admin shell operational
+* [ ] Dashboard operational
+* [ ] Authorization verified
+
+### League
+
+* [ ] League domain operational
+* [ ] League UI operational
+* [ ] Operator scope operational
+
+### Season
+
+* [ ] Season creation operational
+* [ ] Season configuration operational
+* [ ] Lifecycle operational
+
+### Registration
+
+* [ ] Registration operational
+* [ ] Participants operational
+* [ ] Roster lock operational
+
+### Scheduling
+
+* [ ] Rounds operational
+* [ ] Match windows operational
+* [ ] Fixtures generated
+* [ ] Fixtures reviewable
+* [ ] Fixtures manageable
+
+### Matches
+
+* [ ] Match queue operational
+* [ ] Check-in operational
+* [ ] Match lifecycle operational
+* [ ] Exceptions operational
+
+### Results
+
+* [ ] Result queue operational
+* [ ] Confirmation operational
+* [ ] Rejection operational
+* [ ] Correction operational
+
+### Standings
+
+* [ ] Official standings operational
+* [ ] Tie-break rules operational
+* [ ] Recalculation operational
+
+### Exceptions
+
+* [ ] Disputes operational
+* [ ] Penalties operational
+* [ ] Administrative exceptions operational
+
+### Playoffs
+
+* [ ] Top 4 qualification operational
+* [ ] Seeding operational
+* [ ] Bracket operational
+* [ ] Bracket lock operational
+* [ ] Semifinals operational
+* [ ] Final operational
+* [ ] Champion declaration operational
+
+### Governance
+
+* [ ] Audit viewer operational
+* [ ] Sensitive actions audited
+* [ ] Error handling standardized
+* [ ] End-to-end test passes
+* [ ] Clean-environment verification passes
+
+---
+
+# 15. Backlog Governance
+
+This backlog is based on:
+
+* Admin System Specification v1
+* Admin System Gap Matrix v1
+* Locked Admin Architecture Decisions v1
+* canonical NGL MVP requirements
+
+The backlog should not be expanded simply because a new feature sounds useful.
+
+New work must first answer:
+
+1. Does it help operate the league?
+2. Is it required by the canonical MVP?
+3. Does it affect an existing architectural decision?
+4. Does it belong in Admin, Player, Platform Administration, or a future ecosystem layer?
+
+If the answer is unclear, the work should be reviewed before entering implementation.
+
+---
+
+# 16. Implementation Rule
+
+**Build the Admin operating loop before expanding the Player experience.**
+
+The Player system depends on competition data produced by the Admin system.
+
+Therefore:
+
+```text
+Admin creates competition
+        ↓
+Admin configures competition
+        ↓
+Admin opens participation
+        ↓
+Admin creates official roster
+        ↓
+Admin creates schedule
+        ↓
+Admin activates competition
+        ↓
+Player participates
+```
+
+This dependency governs the implementation order.
+
+---
+
+# 17. Backlog Status
+
+**Current state: READY FOR IMPLEMENTATION**
+
+The architecture has passed the following gates:
+
+```text
+Admin Audit
+      ↓
+Admin Specification
+      ↓
+Gap Matrix
+      ↓
+Architecture Decisions
+      ↓
+Implementation Backlog
+      ↓
+IMPLEMENTATION
+```
+
+The next engineering activity is therefore to begin **Phase 1 — Admin Foundation**, starting with the Admin shell, authorization verification, and operational dashboard.

@@ -1,0 +1,388 @@
+NGL Professional — MVP Specification vNext
+
+# 1. Purpose
+
+NGL Professional is NexGen Esport's competitive esports league product. The MVP runs organized EA Sports FC competition beginning in Cross River State and is designed to prove the league operating model before geographic expansion.
+
+The MVP must prioritize **operational reliability, competitive integrity, simple player flows, and strong administrative control** over unnecessary technical complexity.
+
+# 2. Core Product Decision
+
+**The competitive unit is the PLAYER. Clubs are an identity, affiliation, recruitment, and organizational layer — not the NGL Professional standings unit for this MVP.**
+
+A player may belong to a club, but a club does not replace the player as the participant in a league match, fixture, standings row, or playoff bracket.
+
+This decision resolves the current club-vs-player contradiction in the documentation.
+
+# 3. MVP Competition Scope
+
+| Item | Canonical MVP decision |
+| --- | --- |
+| Game | EA Sports FC |
+| Initial geography | Cross River State, Nigeria (operating geography — not a player eligibility filter) |
+| Competition type | Recurring league season |
+| Competitive unit | Individual player |
+| Competition access | OPEN |
+| Season 1 divisions | 1 |
+| Season 1 division capacity | Configurable — final participant count is set when registration closes; NOT hardcoded to 8 |
+| Regular-season format | Single round robin among the final registered participant count |
+| Regular-season duration / fixtures per player | Determined by the scheduling rules in Development → Domain Architecture once participant count is known — see §8 |
+| Playoffs | Top 4 players; semifinals + final; series format TBD (must be configured before playoffs open) |
+| Season 1 player registration | Free |
+| Club creation | Separate club product/economic flow |
+
+
+# 4. Player and Club Relationship
+
+## Player
+
+The player is the primary competitive identity. A player owns their competitive record, match history, standings position, ranking, sanctions, and season participation.
+
+## Club
+
+A club is a managed organization around players. It supports identity, recruitment, membership, roster management, reputation, and future competition formats.
+
+For this MVP:
+
+- A club does not own a player's NGL standings position.
+- A club does not replace player IDs in fixtures or match results.
+- Club affiliation may be displayed alongside a player.
+- Club management may continue independently from NGL season participation.
+- Club economics must not be confused with NGL player registration fees.
+
+# 5. Season Lifecycle
+
+A season follows this canonical lifecycle:
+
+1. **DRAFT** — configuration is being prepared.
+2. **REGISTRATION_OPEN** — eligible players may register.
+3. **REGISTRATION_CLOSED** — registration is closed and eligibility/capacity is finalized.
+4. **ROSTER_LOCKED** — the competitive player pool is frozen.
+5. **ACTIVE** — regular-season matches are played.
+6. **PLAYOFFS** — qualifying players compete in the playoff bracket.
+7. **COMPLETED** — champion and season results are finalized.
+8. **ARCHIVED** — season becomes historical/read-only except for authorized administrative corrections.
+
+No normal user action may bypass these lifecycle rules.
+
+# 6. Registration and Eligibility
+
+Players register individually for a season.
+
+MVP rules:
+
+- Registration is free for Season 1.
+- A player must have a valid player profile.
+- A player must satisfy the season's eligibility rules.
+- Division capacity is enforced transactionally.
+- Duplicate registration for the same player and season is rejected.
+- Registration closes before roster lock.
+- Once roster lock occurs, ordinary players cannot join or leave the competitive pool.
+- Administrative overrides require authorization and an audit record.
+
+# 7. Division Structure
+
+A division is the competition container for a season.
+
+Season 1 target:
+
+- One single-table division.
+- Capacity: configurable, finalized at registration close (not hardcoded to any fixed number, including 8).
+- Regular-season rounds: determined by the final participant count and the scheduling rules (see §8).
+- Top 4 advance to playoffs.
+
+The architecture supports additional divisions and larger capacities as a platform capability; Season 1 launches with exactly one division.
+
+# 8. Fixture and Schedule Rules
+
+The Season 1 scheduler generates a single round robin among the **final registered participant count** (not a fixed number of players).
+
+Each player plays every other player exactly once. Beyond that base rule, the scheduling engine must explicitly define — as a Development-layer specification, not a guess — for the actual Season 1 participant count:
+
+- number of fixtures per player per round/week;
+- total regular-season duration;
+- handling of odd participant counts;
+- maximum scheduling density (can a player have more than one match in a week?);
+- how the playoffs begin once the regular season ends.
+
+
+Each fixture must reference:
+
+- season;
+- division;
+- round/match week;
+- home player;
+- away player;
+- scheduled time where applicable;
+- lifecycle state.
+
+The same player cannot be scheduled against themselves.
+
+The scheduling engine may be reusable/configurable, but the generated Season 1 schedule must conform to this specification.
+
+# 9. Match Lifecycle
+
+The match lifecycle must support at minimum:
+
+**SCHEDULED → CHECK_IN_OPEN → IN_PROGRESS → RESULT_SUBMITTED → CONFIRMED → COMPLETED**
+
+Exceptional states include cancellation, voiding, no-show, forfeit, dispute, and administrative correction.
+
+Automation may handle timing and routine transitions. Human operators retain authority over judgment-based decisions such as disputes, sanctions, no-shows, and exceptional corrections.
+
+# 10. Result Submission and Competitive Truth
+
+A submitted result is **not automatically competitive truth**.
+
+Canonical flow:
+
+Player submits result → evidence/validation → opponent confirmation or rejection → operator review when required → result confirmed → standings recalculated.
+
+Result submission must support:
+
+- match identification;
+- submitted scores;
+- submitting player;
+- evidence where required;
+- confirmation/rejection state;
+- timestamps;
+- correction history;
+- operator/HQ override when authorized.
+
+Every action capable of changing competitive truth must produce an audit record.
+
+# 11. Standings
+
+Standings are calculated from **confirmed competition results**, not unverified submissions.
+
+Default points:
+
+- Win = 3
+- Draw = 1
+- Loss = 0
+- Forfeit loss = 0 plus applicable penalty review
+
+The canonical standings record is player-based.
+
+Minimum displayed fields:
+
+- position;
+- player;
+- club affiliation, if any;
+- played;
+- wins;
+- draws;
+- losses;
+- goals for;
+- goals against;
+- goal difference;
+- points.
+
+Standings must recalculate automatically when a result becomes confirmed or when an authorized penalty changes competitive outcomes.
+
+Manual standings edits are restricted administrative corrections, not the normal operating mechanism.
+
+# 12. Playoffs
+
+The top four players after the regular season qualify.
+
+The playoff bracket is determined from final regular-season standings and must be locked before playoff matches begin.
+
+The playoff system must preserve:
+
+- qualification order;
+- match results;
+- advancement state;
+- champion determination;
+- audit history.
+
+The exact best-of-one/best-of-series rule must be explicitly configured for the season before playoffs open. It must not be left ambiguous in implementation.
+
+# 13. Disputes, No-Shows and Penalties
+
+Competitive disputes are handled through a formal operator workflow.
+
+Players may:
+
+- reject a submitted result;
+- open a dispute;
+- submit evidence;
+- respond to operator requests.
+
+Operators may:
+
+- review evidence;
+- confirm or reject outcomes;
+- assign no-show/forfeit outcomes;
+- apply penalties within their authority;
+- escalate matters to HQ.
+
+HQ retains final override authority.
+
+No disciplinary action may silently alter a player's competitive record; the action, actor, reason, and resulting state must be auditable.
+
+# 14. Player Classification
+
+**Classification is explicitly out of scope for Season 1 eligibility and is not part of this specification.** Per **Documentation Governance §10**, classification is a future competitive-progression system based on demonstrated competitive history — it is not identity verification, account status, reputation, or an eligibility gate, and it must never determine Season 1 entry, placement, or standings.
+
+Any classification model (e.g. Amateur/Competitive/Elite tiers) belongs in the general Player System documentation as a **future capability**, kept fully separate from this Season 1 spec.
+
+# 15. Clubs in the MVP
+
+Club functionality remains in scope as a platform capability, but club competition is **not** the canonical NGL Professional Season 1 competition model.
+
+MVP club capabilities may include:
+
+- club creation;
+- approval;
+- ownership;
+- manager/staff roles;
+- roster management;
+- player recruitment;
+- membership state;
+- club profile;
+- club suspension/dissolution.
+
+A player's club affiliation is contextual metadata on the competitive player record.
+
+# 16. Roles and Authority
+
+Competitive authority follows this order:
+
+**HQ / Super Admin → League Operator → Moderator / Support roles → Player**
+
+Players control their own normal competitive actions but cannot alter competitive truth directly.
+
+Operators act only within assigned scope.
+
+HQ has final authority over season configuration, exceptional overrides, disputes escalated beyond operator authority, and critical competitive corrections.
+
+Backend authorization is the security source of truth. UI visibility alone is never considered authorization.
+
+# 17. Notifications and Realtime
+
+Realtime delivery is a convenience layer, not the source of truth.
+
+The MVP may use Pusher for meaningful events such as:
+
+- match state changes;
+- result status changes;
+- standings updates;
+- dispute status changes;
+- operator/admin counters.
+
+The system must remain correct if realtime delivery fails; clients can recover through normal API reads/polling.
+
+# 18. Audit and Competitive Integrity
+
+The system must maintain an append-only audit trail for sensitive competitive actions.
+
+At minimum, audit records should identify:
+
+- actor;
+- action;
+- resource;
+- timestamp;
+- previous state where relevant;
+- new state where relevant;
+- reason/context where required.
+
+Competitive truth must always be explainable after the fact.
+
+# 19. MVP Economics
+
+Season 1 player participation is free.
+
+Club fees, if charged, are separate from league participation and must never be represented as a Season 1 player registration fee.
+
+Future monetization may introduce paid league registration, sponsorship, advertising, ticketing, merchandise, academy products, or other revenue mechanisms, but none is part of the canonical Season 1 competitive entry requirement unless explicitly added through a versioned specification change.
+
+# 20. Out of Scope for Season 1
+
+The following are not required to validate the core NGL Professional MVP:
+
+- club-vs-club league standings;
+- club-based fixture generation;
+- multi-region competition;
+- promotion/relegation between live divisions;
+- complex player transfer economics;
+- automated disciplinary decisions;
+- advanced prize-wallet automation;
+- large-scale tournament formats;
+- multi-game league support.
+
+Future architecture may support these capabilities, but MVP implementation must not let them distort the Season 1 operating model.
+
+# 21. Canonical Terminology
+
+Use these terms consistently:
+
+| Term | Canonical meaning |
+| --- | --- |
+| Player | Individual competitive participant |
+| Club | Player organization/affiliation layer |
+| Season | Time-bounded competition cycle |
+| Division | Competition container within a season |
+| Fixture | Scheduled pairing between two players |
+| Match | The actual competitive encounter for a fixture |
+| Result | Submitted/verified outcome of a match |
+| Confirmed Result | Outcome accepted as competitive truth |
+| Standings | Player ranking within the division based on confirmed competition data |
+| Playoffs | Post-regular-season elimination stage for qualified players |
+
+Avoid using **team**, **club standings**, or **club fixture** when the underlying entity is a player competition object.
+
+# 22. Definition of MVP Complete
+
+NGL Professional Season 1 MVP is functionally complete when an eligible player can:
+
+1. create/maintain a player identity;
+2. register for an open season;
+3. enter a locked division whose capacity was finalized at registration close (not assumed to be 8);
+4. view their scheduled regular-season fixtures;
+5. complete matches through the defined match lifecycle;
+6. submit verifiable results;
+7. resolve or escalate result disputes;
+8. see standings derived from confirmed results;
+9. qualify for and participate in playoffs when eligible;
+10. see the final champion and season record.
+
+Operators must be able to configure and control the season, manage exceptions, resolve disputes, and audit competitive changes without developer intervention.
+
+# 23. Specification Precedence
+
+For NGL MVP decisions, use this precedence:
+
+1. **NGL Professional — MVP Specification vNext**
+2. Approved governance/rule decisions that do not conflict with this specification
+3. API/data/state-machine specifications derived from this document
+4. Architecture decisions derived from this document
+5. UI/UX implementation
+6. Legacy source documents
+
+If a lower-level document conflicts with this specification, the lower-level document must be corrected rather than silently creating a second product definition.
+
+# 24. Reconciliation Requirements
+
+The following existing documentation still needs reconciliation against this specification (tracked in **Platform System Tracker → Documentation Reconciliation Work**):
+
+- Season 1 Format & Player Classification — **ARCHIVED 2026-09-06**, superseded by this document (see Source Mapping & Update Log)
+- Season Architecture & Operations Guide
+- League Overview & Purpose
+- Roadmap: MVP Epics & Features
+- Match Operations
+- Operator Handbook
+- Data Model
+- API Foundation
+- State Machines
+- frontend leaderboard/match terminology
+
+The most important remaining reconciliation is removing any remaining assumption that Season 1 NGL standings or fixtures are club-based, and updating the above documents' references to fixed player counts.
+
+# 25. Change Control
+
+This specification is versioned. Changes to core competition identity, season format, registration economics, standings rules, playoff structure, or competitive authority require an explicit specification update.
+
+Do not modify implementation to resolve a product contradiction until this document has been updated first.
+
+**Canonical rule:** one product decision, one source of truth.

@@ -1,0 +1,1295 @@
+NGL Admin Management System Gap Matrix v1
+
+**Product:** NexGen Esport League System
+**System:** Admin / Management
+**Version:** v1.0
+**Status:** Audit / Implementation Planning
+**Baseline:** Current Monorepo implementation
+**Authority:** Current NGL MVP specification
+
+---
+
+## 1. Status Definitions
+
+| Status                  | Meaning                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 🟢 Implemented          | Capability exists and is substantially usable at the relevant layer                                              |
+| 🟡 Partial              | Foundation exists, but important API/UI/operational capability is missing                                        |
+| 🔴 Missing              | Required capability is not implemented                                                                           |
+| ⛔ Architecturally Wrong | Existing implementation conflicts with the intended operating model and should be redesigned rather than patched |
+
+---
+
+# 2. Executive Summary
+
+The current platform has a **strong backend foundation**, but it is not yet an operational Admin/Management system.
+
+The biggest problem is not that the database or API is empty.
+
+The problem is that the implementation stops at individual capabilities instead of forming a complete operational workflow.
+
+### Overall assessment
+
+| Area                         | Status |
+| ---------------------------- | ------ |
+| Admin authentication         | 🟢     |
+| Authorization foundation     | 🟢     |
+| User/RBAC administration     | 🟡     |
+| League management            | 🔴     |
+| Season lifecycle engine      | 🟢     |
+| Season configuration         | 🟡     |
+| Division management          | 🟢     |
+| Registration                 | 🟡     |
+| Participant management       | 🟡     |
+| Roster management            | 🟡     |
+| Fixture generation           | 🟢     |
+| Fixture management           | 🔴     |
+| Match management             | 🟡     |
+| Result management            | 🟡     |
+| Standings                    | 🟡     |
+| Disputes                     | 🟡     |
+| Penalties                    | 🟡     |
+| Playoffs                     | 🔴     |
+| Audit                        | 🟡     |
+| Admin dashboard              | 🔴     |
+| Season operational workspace | 🔴     |
+| End-to-end Admin workflow    | 🔴     |
+
+### Core conclusion
+
+> **The current system is a backend competition foundation, not yet a complete League Management System.**
+
+---
+
+# 3. Architecture-Level Gaps
+
+## 3.1 League Layer
+
+**Status: 🔴 Missing**
+
+### Required
+
+The Admin model requires:
+
+```text
+League
+  └── Seasons
+```
+
+### Current implementation
+
+The current Prisma/API implementation is centered around:
+
+```text
+Season
+  └── Division
+      └── Participants / Fixtures / Matches
+```
+
+There is no complete first-class League management subsystem identified in the current implementation.
+
+### Gap
+
+Missing:
+
+* League model
+* League service
+* League controller
+* League UI
+* league-to-season relationship
+* league operators
+* league-level configuration
+* league-level history
+
+### Impact
+
+This is an architectural gap because the platform is intended to support **reusable league operations**, not only one isolated NGL season.
+
+### Priority
+
+**P0 — Architecture**
+
+This should be resolved before treating the Admin hierarchy as final.
+
+---
+
+# 4. Platform Administration
+
+## 4.1 Admin Authentication
+
+**Status: 🟢 Implemented**
+
+Current implementation includes:
+
+* authenticated Admin routes
+* role-based route protection
+* permission-based route protection
+* HTTP-only authentication cookies
+* authenticated API requests
+
+Relevant implementation:
+
+```text
+apps/web/app/lib/auth-guard.ts
+apps/api/src/common/authz/*
+```
+
+### Remaining work
+
+Mostly UX and operational hardening.
+
+---
+
+## 4.2 Roles and Permissions
+
+**Status: 🟢 Foundation / 🟡 Operationally Partial**
+
+Current permission vocabulary includes:
+
+```text
+MANAGE_USERS
+MANAGE_ROLES
+MANAGE_SEASONS
+MANAGE_MATCHES
+MANAGE_RESULTS
+MANAGE_DISPUTES
+MANAGE_PENALTIES
+MANAGE_CLUBS
+VIEW_AUDIT
+VIEW_ADMIN_DASHBOARD
+```
+
+Roles include:
+
+```text
+PLAYER
+CLUB_MANAGER
+OPERATOR
+COMMISSIONER
+HQ_ADMIN
+```
+
+### Implemented
+
+* role assignment
+* role revocation
+* operator profile
+* operator division scope
+* permission guard
+* permission-derived user permissions
+
+### Gaps
+
+* complete role operating model
+* league/operator scope model
+* granular operational permissions
+* Admin UI for the complete permission matrix
+* clear Commissioner vs Operator authority boundaries
+
+### Priority
+
+**P1**
+
+---
+
+# 5. Admin Dashboard
+
+**Status: 🔴 Missing**
+
+Current `/admin/dashboard` is essentially a protected shell.
+
+It does not yet function as the operational control center defined by the specification.
+
+### Missing
+
+* active seasons
+* registration status
+* participant counts
+* fixture status
+* pending results
+* active matches
+* unresolved disputes
+* penalties
+* operational alerts
+* quick actions
+* system health indicators
+
+### Impact
+
+Admin has no central operational overview.
+
+### Priority
+
+**P0**
+
+---
+
+# 6. League Management
+
+**Status: 🔴 Missing**
+
+Required capabilities:
+
+```text
+Create League
+View League
+Update League
+Manage League Operators
+View Seasons
+View League History
+```
+
+Current implementation does not provide the required first-class League subsystem.
+
+### Priority
+
+**P0**
+
+---
+
+# 7. Season Management
+
+## 7.1 Season Creation
+
+**Status: 🟢 Backend / 🟡 UI**
+
+Current backend supports season creation.
+
+The service:
+
+* validates dates
+* creates the season
+* creates an initial default division
+* records creation event/audit information
+
+### Gap
+
+The Admin UI does not currently provide a proper season creation workflow.
+
+### Priority
+
+**P0**
+
+---
+
+## 7.2 Season Lifecycle
+
+**Status: 🟢 Backend / 🟡 UI**
+
+Backend supports:
+
+```text
+DRAFT
+REGISTRATION_OPEN
+REGISTRATION_CLOSED
+ROSTER_LOCKED
+ACTIVE
+PLAYOFFS
+COMPLETED
+ARCHIVED
+```
+
+And transitions including:
+
+```text
+DRAFT → REGISTRATION_OPEN
+REGISTRATION_OPEN → REGISTRATION_CLOSED
+REGISTRATION_CLOSED → ROSTER_LOCKED
+ROSTER_LOCKED → ACTIVE
+ACTIVE → PLAYOFFS
+PLAYOFFS → COMPLETED
+COMPLETED → ARCHIVED
+```
+
+### Major UI gap
+
+Current Seasons UI does not expose the entire lifecycle.
+
+Notably:
+
+* Lock Roster is missing
+* Generate Fixtures is missing
+* configuration workflow is incomplete
+* operational workspace is missing
+
+### Priority
+
+**P0**
+
+---
+
+# 8. Season Configuration
+
+**Status: 🟡 Partial**
+
+Backend supports:
+
+* season dates
+* description
+* divisions
+* division format
+* division capacity
+* competition format
+
+### Missing/unclear
+
+* complete configuration workspace
+* scheduling policy configuration
+* match configuration
+* playoff configuration
+* competition rules configuration
+* protection of sensitive configuration after roster lock
+* clear configuration validation UI
+
+### Important unresolved issue
+
+The canonical specification does **not** permit us to assume:
+
+> one round = one week
+
+or
+
+> one player plays exactly one match per week.
+
+Therefore scheduling density must be defined before the registration/fixture workflow is finalized.
+
+### Priority
+
+**P0**
+
+---
+
+# 9. Division Management
+
+**Status: 🟢 Backend / 🟡 UI**
+
+Backend supports:
+
+* create division
+* update division
+* deactivate division
+* division capacity
+* competition format
+
+### UI gap
+
+The current Seasons UI imports division functions but does not provide a complete division management workflow.
+
+### Priority
+
+**P1**
+
+---
+
+# 10. Registration Management
+
+**Status: 🟡 Partial**
+
+Backend supports:
+
+* registration
+* registration window
+* duplicate protection
+* capacity validation
+* participant status
+* withdrawal
+
+### Gaps
+
+Admin UI lacks:
+
+* registration control workspace
+* participant monitoring
+* registration metrics
+* administrative registration overrides
+* registration audit workflow
+* explicit final registration review
+
+### Architectural concern
+
+Participant registration endpoints currently rely largely on authenticated access rather than a clearly separated Admin management capability.
+
+### Priority
+
+**P0**
+
+---
+
+# 11. Participant Management
+
+**Status: 🟡 Partial**
+
+Backend has:
+
+```text
+DivisionParticipant
+```
+
+with:
+
+* season
+* division
+* player
+* status
+* seed
+* registration timestamp
+* withdrawal timestamp
+
+### Implemented
+
+* register
+* list
+* withdraw
+* duplicate protection
+* minimum participant validation
+
+### Missing
+
+* Admin participant workspace
+* participant search/filtering
+* participant detail
+* administrative removal workflow
+* administrative override
+* reason capture
+* participant history
+* final roster review
+
+### Priority
+
+**P0**
+
+---
+
+# 12. Roster Management
+
+**Status: 🟡 Backend / 🔴 UI**
+
+Backend implements roster locking.
+
+Validation includes:
+
+* active divisions
+* minimum participants
+* valid participant state
+
+### UI
+
+Current Seasons UI does not expose:
+
+```text
+Lock Roster
+```
+
+### Result
+
+The backend knows how to lock a roster, but an Admin cannot currently operate the complete workflow from the UI.
+
+### Priority
+
+**P0**
+
+---
+
+# 13. Fixture Generation
+
+**Status: 🟢 Backend / 🟡 UI**
+
+Current implementation supports:
+
+* roster-locked requirement
+* active division validation
+* participant validation
+* deterministic participant ordering
+* single round robin
+* double round robin
+* MatchWeek creation
+* Fixture creation
+* Match creation
+* MatchParticipant creation
+* duplicate-generation protection
+
+This is one of the strongest current backend capabilities.
+
+### UI gap
+
+The Admin cannot currently perform the operation through the intended Season workspace.
+
+### Priority
+
+**P0**
+
+---
+
+# 14. Fixture Management
+
+**Status: 🔴 Missing**
+
+Fixture generation exists, but fixture **management** does not.
+
+Required:
+
+```text
+List fixtures
+View fixture
+Filter fixtures
+Schedule fixture
+Reschedule fixture
+Cancel fixture
+Void fixture
+Review schedule
+```
+
+Current API exposes essentially:
+
+```text
+POST /fixtures/seasons/:seasonId/divisions/:divisionId/generate
+```
+
+### Missing
+
+* GET fixtures
+* fixture detail
+* schedule modification
+* rescheduling
+* cancellation
+* voiding
+* administrative history
+* schedule approval/review
+
+### Architectural distinction
+
+> **Fixture generation ≠ Fixture management.**
+
+### Priority
+
+**P0**
+
+---
+
+# 15. Match Management
+
+**Status: 🟡 Partial**
+
+Backend has:
+
+* match listing
+* manual match creation
+* match participants
+* result submission
+* result confirmation
+
+### Missing
+
+Complete operational lifecycle:
+
+```text
+SCHEDULED
+CHECK_IN_OPEN
+IN_PROGRESS
+RESULT_SUBMITTED
+CONFIRMED
+COMPLETED
+```
+
+plus:
+
+```text
+CANCELLED
+VOID
+FORFEIT
+NO_SHOW
+DISPUTED
+```
+
+### Missing API operations
+
+* open check-in
+* start match
+* complete match
+* cancel
+* void
+* no-show
+* forfeit
+* administrative correction
+* match state history
+
+### UI
+
+Current `/matches` operational UI is not implemented as a complete Admin workspace.
+
+### Priority
+
+**P0**
+
+---
+
+# 16. Result Management
+
+**Status: 🟡 Partial**
+
+Backend supports:
+
+```text
+Player submits result
+→ Admin/authorized user confirms result
+```
+
+Actor identity is now correctly derived from authentication context.
+
+### Missing
+
+* pending-result Admin queue
+* evidence inspection
+* rejection workflow
+* result dispute workflow
+* operator review
+* correction workflow
+* result history
+* complete UI
+
+### Important
+
+Standings should only consume confirmed official results.
+
+That architectural principle is already aligned with the target model.
+
+### Priority
+
+**P0**
+
+---
+
+# 17. Standings
+
+**Status: 🟡 Partial**
+
+Backend supports season standings and leaderboard queries.
+
+### Strength
+
+The current architecture is result-derived rather than treating standings as independently editable competition truth.
+
+### Missing
+
+* Admin standings workspace
+* standings calculation visibility
+* tie-break inspection
+* correction workflow
+* operational anomaly handling
+* standings history
+* playoff qualification workflow
+
+### Priority
+
+**P1**
+
+---
+
+# 18. Playoffs
+
+**Status: 🔴 Missing**
+
+Current backend only has the season lifecycle transition:
+
+```text
+ACTIVE → PLAYOFFS
+```
+
+This is **not a playoff subsystem**.
+
+### Required
+
+```text
+Determine qualifiers
+→ Seed Top 4
+→ Generate bracket
+→ Review bracket
+→ Lock bracket
+→ Run semifinals
+→ Run final
+→ Declare champion
+```
+
+### Missing
+
+* playoff model
+* playoff bracket model
+* qualification service
+* seeding
+* bracket generation
+* bracket locking
+* playoff fixtures
+* playoff matches
+* champion declaration
+* playoff UI
+* playoff audit workflow
+
+### Priority
+
+**P0**
+
+---
+
+# 19. Dispute Management
+
+**Status: 🟡 Partial**
+
+Backend supports:
+
+* listing
+* creation
+* dispute service status update
+
+### Critical gap
+
+The service has status-management functionality, but the Controller does not expose the complete administrative status workflow.
+
+Therefore:
+
+```text
+Service capability ≠ Admin capability
+```
+
+### Missing
+
+* Admin dispute queue
+* dispute detail
+* evidence review
+* assignment
+* status transition API
+* resolution recording
+* resolution UI
+* audit trail presentation
+
+### Priority
+
+**P0**
+
+---
+
+# 20. Penalty Management
+
+**Status: 🟡 Partial**
+
+Backend supports:
+
+* penalty creation
+* listing
+* status update in service
+
+### Critical gap
+
+The status-update capability is not exposed through the current controller.
+
+### Missing
+
+* penalty administration workspace
+* penalty detail
+* status workflow API
+* revoke/correction workflow
+* reason/decision UI
+* competition impact handling
+* audit presentation
+
+### Priority
+
+**P0**
+
+---
+
+# 21. Audit Management
+
+**Status: 🟡 Partial**
+
+The backend contains an AuditLog system and operational actions already emit audit information.
+
+### Strength
+
+Audit infrastructure exists.
+
+### Missing
+
+* complete Admin audit UI
+* filtering
+* entity history
+* actor filtering
+* action filtering
+* before/after inspection
+* competition-specific audit view
+* clear immutable-history presentation
+
+### Priority
+
+**P1**
+
+---
+
+# 22. Admin User Management
+
+**Status: 🟡 Partial**
+
+Current API supports:
+
+```text
+List users
+Assign role
+Revoke role
+Manage operator profile
+Manage operator division scope
+```
+
+### Missing
+
+* complete Admin user interface
+* account status management
+* operational user search/filtering
+* league/operator assignment
+* clear authority management
+* audit-oriented role history
+
+### Priority
+
+**P1**
+
+---
+
+# 23. Current Web Application Gap
+
+The current Admin-facing route structure is:
+
+```text
+/admin/dashboard
+/admin/rbac
+/seasons
+/results
+/disputes
+/penalties
+/audit
+/fixtures
+```
+
+However, most of these are currently shells or incomplete operational pages.
+
+### Current reality
+
+```text
+Admin dashboard       → protected shell
+RBAC                  → partially functional
+Seasons               → basic lifecycle list
+Fixtures              → shell
+Results               → shell
+Disputes              → shell
+Penalties             → shell
+Audit                 → shell
+```
+
+### Target
+
+```text
+Admin Dashboard
+      ↓
+League
+      ↓
+Season Workspace
+      ↓
+Configuration
+Registration
+Participants
+Roster
+Fixtures
+Matches
+Results
+Standings
+Playoffs
+Disputes
+Penalties
+Audit
+```
+
+This is one of the largest gaps in the project.
+
+---
+
+# 24. API Capability Matrix
+
+| Capability           |                   API |  Admin-ready? | Status |
+| -------------------- | --------------------: | ------------: | ------ |
+| Create season        |                   Yes |           Yes | 🟢     |
+| List seasons         |                   Yes |           Yes | 🟢     |
+| Publish season       |                   Yes |           Yes | 🟢     |
+| Close registration   |                   Yes |           Yes | 🟢     |
+| Lock roster          |                   Yes |           Yes | 🟢     |
+| Activate season      |                   Yes |           Yes | 🟢     |
+| Start playoffs       |                   Yes |            No | 🟡     |
+| Complete season      |                   Yes |           Yes | 🟢     |
+| Archive season       |                   Yes |           Yes | 🟢     |
+| Create division      |                   Yes |           Yes | 🟢     |
+| Update division      |                   Yes |           Yes | 🟢     |
+| Deactivate division  |                   Yes |           Yes | 🟢     |
+| Register participant |                   Yes |       Partial | 🟡     |
+| List participants    |                   Yes |       Partial | 🟡     |
+| Withdraw participant |                   Yes |       Partial | 🟡     |
+| Generate fixtures    |                   Yes |           Yes | 🟢     |
+| List fixtures        | No dedicated endpoint |            No | 🔴     |
+| Reschedule fixture   |                    No |            No | 🔴     |
+| Cancel fixture       |                    No |            No | 🔴     |
+| Match listing        |                   Yes |           Yes | 🟢     |
+| Match lifecycle      |               Partial |            No | 🟡     |
+| Submit result        |                   Yes |           Yes | 🟢     |
+| Confirm result       |                   Yes |           Yes | 🟢     |
+| Reject result        |  No complete workflow |            No | 🔴     |
+| Correct result       |  No complete workflow |            No | 🔴     |
+| Standings            |                   Yes | Read-oriented | 🟡     |
+| Create dispute       |                   Yes |       Partial | 🟡     |
+| Update dispute       |          Service only |            No | 🔴     |
+| Create penalty       |                   Yes |       Partial | 🟡     |
+| Update penalty       |          Service only |            No | 🔴     |
+| Playoff bracket      |                    No |            No | 🔴     |
+| Audit                | Infrastructure exists |       Partial | 🟡     |
+| League management    |                    No |            No | 🔴     |
+
+---
+
+# 25. UI Capability Matrix
+
+| Admin capability        | Current UI | Status |
+| ----------------------- | ---------- | ------ |
+| Admin dashboard         | Shell      | 🔴     |
+| User/RBAC management    | Partial    | 🟡     |
+| League management       | Missing    | 🔴     |
+| Create season           | Missing    | 🔴     |
+| Season list             | Exists     | 🟡     |
+| Season detail workspace | Missing    | 🔴     |
+| Season configuration    | Partial    | 🟡     |
+| Division management     | Partial    | 🟡     |
+| Registration management | Missing    | 🔴     |
+| Participant management  | Missing    | 🔴     |
+| Roster lock             | Missing    | 🔴     |
+| Fixture generation      | Missing    | 🔴     |
+| Fixture review          | Missing    | 🔴     |
+| Fixture management      | Missing    | 🔴     |
+| Match operations        | Missing    | 🔴     |
+| Result queue            | Missing    | 🔴     |
+| Result review           | Missing    | 🔴     |
+| Standings management    | Missing    | 🔴     |
+| Playoff management      | Missing    | 🔴     |
+| Dispute management      | Shell      | 🔴     |
+| Penalty management      | Shell      | 🔴     |
+| Audit viewer            | Shell      | 🔴     |
+
+---
+
+# 26. Architectural vs Implementation Gaps
+
+Not every gap should be treated the same.
+
+## Architectural gaps
+
+These require design before coding:
+
+1. League layer
+2. Season-to-League relationship
+3. Operator/league scope
+4. Scheduling model
+5. Match lifecycle completeness
+6. Playoff domain
+7. Administrative exception model
+8. Result correction model
+
+---
+
+## Backend implementation gaps
+
+These require API/domain work:
+
+1. Fixture management
+2. Match lifecycle operations
+3. Result rejection/correction
+4. Dispute status endpoints
+5. Penalty status endpoints
+6. Playoff subsystem
+7. League subsystem
+8. Administrative participant overrides
+
+---
+
+## Frontend implementation gaps
+
+These require UI work:
+
+1. Admin dashboard
+2. League workspace
+3. Season workspace
+4. Configuration
+5. Registration
+6. Participants
+7. Roster
+8. Fixtures
+9. Matches
+10. Results
+11. Standings
+12. Playoffs
+13. Disputes
+14. Penalties
+15. Audit
+
+---
+
+# 27. Priority Classification
+
+## P0 — Must resolve before Admin MVP is operational
+
+* League architecture
+* Admin dashboard
+* Season workspace
+* Season creation UI
+* Season configuration
+* Registration management
+* Participant management
+* Roster management
+* Fixture management
+* Match lifecycle
+* Result verification workflow
+* Playoff subsystem
+* Dispute resolution
+* Penalty management
+* end-to-end Admin workflow
+
+---
+
+## P1 — Important but can follow the core operating loop
+
+* advanced RBAC
+* advanced operator scope
+* standings analytics
+* advanced audit filtering
+* bulk operations
+* advanced reporting
+* operational dashboards/metrics
+
+---
+
+## P2 — Later enhancement
+
+* advanced analytics
+* automated reporting
+* sophisticated scheduling optimization
+* advanced sponsor controls
+* advanced communication automation
+
+---
+
+# 28. Recommended Implementation Dependency Graph
+
+The gaps are not independent.
+
+The correct dependency chain is:
+
+```text
+League Architecture
+        ↓
+Season Workspace
+        ↓
+Season Configuration
+        ↓
+Registration
+        ↓
+Participants
+        ↓
+Roster Lock
+        ↓
+Scheduling / Fixture Management
+        ↓
+Match Operations
+        ↓
+Result Verification
+        ↓
+Standings
+        ↓
+Playoff Qualification
+        ↓
+Playoff Bracket
+        ↓
+Playoff Matches
+        ↓
+Champion
+        ↓
+Season Completion
+        ↓
+Archive
+```
+
+Cross-cutting:
+
+```text
+RBAC ───────────────┐
+Audit ──────────────┼──► Every operational layer
+Notifications ─────┘
+```
+
+---
+
+# 29. What We Should NOT Do
+
+The gap matrix identifies several tempting but incorrect implementation approaches.
+
+### Do not:
+
+* build separate disconnected Admin CRUD pages
+* continue expanding the player dashboard
+* build more player features before competition management exists
+* manually edit database records to operate a league
+* treat fixture generation as complete fixture management
+* treat `ACTIVE → PLAYOFFS` as a playoff implementation
+* allow standings to become manually editable competition truth
+* add increasingly granular permissions before the operating model is settled
+* patch the existing UI one page at a time without establishing the Season Workspace
+
+---
+
+# 30. Immediate Engineering Backlog
+
+The first implementation backlog should be:
+
+### Epic A — Admin Foundation
+
+* Admin shell
+* navigation
+* dashboard
+* authorization integration
+* operational alerts
+
+### Epic B — League Management
+
+* League domain
+* League API
+* League UI
+* operator assignment
+
+### Epic C — Season Workspace
+
+* season detail
+* configuration
+* lifecycle actions
+* division management
+
+### Epic D — Registration & Roster
+
+* registration workspace
+* participant management
+* participant overrides
+* roster review
+* roster lock
+
+### Epic E — Scheduling
+
+* fixture generation UI
+* fixture list
+* schedule review
+* rescheduling
+* fixture state management
+
+### Epic F — Match Operations
+
+* match queue
+* check-in
+* lifecycle controls
+* no-show
+* forfeit
+* cancellation
+* void
+
+### Epic G — Results
+
+* result queue
+* evidence
+* confirmation
+* rejection
+* operator review
+* correction
+
+### Epic H — Competition Resolution
+
+* standings workspace
+* disputes
+* penalties
+
+### Epic I — Playoffs
+
+* qualification
+* seeding
+* bracket
+* bracket lock
+* semifinal
+* final
+* champion
+
+### Epic J — Governance
+
+* audit viewer
+* entity history
+* role governance
+* operational hardening
+
+---
+
+# 31. Final Assessment
+
+The current implementation should **not** be described as an unfinished Admin dashboard.
+
+That understates the situation.
+
+The more accurate description is:
+
+> **The platform currently contains substantial competition-engine backend infrastructure, but the Admin/Management operating system that orchestrates those capabilities has not yet been built.**
+
+That is actually a good position to be in.
+
+The difficult foundational pieces already exist:
+
+* authentication
+* authorization
+* player-centric competition model
+* season lifecycle
+* division model
+* participant model
+* round-robin generation
+* match/result foundations
+* standings foundations
+* audit/outbox infrastructure
+
+The remaining work is to turn these foundations into a coherent **League Operations System**.
+
+---
+
+# 32. Next Gate
+
+Before implementation begins, the following four architectural questions must be locked:
+
+1. **League domain**
+
+   * What exactly is a League?
+   * How does it relate to NGL Professional?
+   * Can one platform host multiple leagues?
+
+2. **Scheduling model**
+
+   * How are fixtures distributed across dates/weeks?
+   * What determines match scheduling?
+   * What happens when a match is missed?
+
+3. **Playoff domain**
+
+   * How are Top 4 qualifiers determined?
+   * How is seeding calculated?
+   * How is the bracket represented?
+
+4. **Administrative exception model**
+
+   * Which changes can an Admin make after roster lock?
+   * Which actions require reason/evidence?
+   * Which actions require Commissioner vs HQ Admin authority?
+
+These decisions should be settled before the corresponding implementation phases.
+
+**The next artifact should therefore be the Admin System Implementation Backlog v1, but only after these architectural gates are resolved.**

@@ -1,0 +1,1524 @@
+NGL Admin Management System Specification v1
+
+**Product:** NexGen Esport League System
+**System:** Admin / Management
+**Version:** v1.0
+**Status:** Draft for implementation review
+**Authority:** Derived from the current NGL MVP specification and current platform architecture
+
+---
+
+## 1. Purpose
+
+The Admin / Management system is the operational control layer of the NexGen Esport League System.
+
+Its purpose is to allow authorized league personnel to operate a league from creation through completion without requiring developer intervention for normal league operations.
+
+The system must support:
+
+* league administration
+* season creation
+* competition configuration
+* registration management
+* participant management
+* roster locking
+* fixture generation and management
+* match operations
+* result verification
+* standings operations
+* playoff management
+* disputes
+* penalties
+* auditability
+* operator access control
+
+The Admin system is therefore an **operational league-management system**, not merely an administrative CRUD interface.
+
+---
+
+# 2. Core Architectural Principle
+
+The system follows this relationship:
+
+```text
+Platform Administration
+        │
+        ├── Users
+        ├── Roles
+        ├── Permissions
+        └── Audit
+        │
+        ▼
+League Management
+        │
+        ├── League
+        │
+        └── Season
+              │
+              ├── Configuration
+              ├── Registration
+              ├── Participants
+              ├── Roster
+              ├── Fixtures
+              ├── Matches
+              ├── Results
+              ├── Standings
+              ├── Playoffs
+              ├── Disputes
+              └── Penalties
+```
+
+### Rule
+
+**Platform Administration controls who can operate the system.**
+
+**League Management controls what competition is being operated.**
+
+These responsibilities must remain conceptually separate.
+
+---
+
+# 3. Admin Personas
+
+The MVP recognizes the following operational roles.
+
+## 3.1 HQ Admin
+
+Highest platform-level administrative authority.
+
+Responsibilities:
+
+* manage users
+* manage roles
+* manage permissions
+* manage operators
+* manage leagues
+* manage seasons
+* manage competitions
+* override operational states where explicitly permitted
+* access platform audit records
+* manage serious administrative exceptions
+
+---
+
+## 3.2 Commissioner
+
+League-level authority.
+
+Responsibilities may include:
+
+* create/manage league operations
+* create seasons
+* configure competitions
+* manage registration
+* manage participants
+* lock rosters
+* manage fixtures
+* manage matches
+* verify results
+* resolve disputes
+* apply/manage penalties
+* operate playoffs
+* complete and archive seasons
+
+Commissioner authority is lower than HQ Admin at the platform level.
+
+---
+
+## 3.3 Operator
+
+Operational match/league personnel.
+
+Responsibilities depend on assigned permissions/scope.
+
+Potential responsibilities:
+
+* monitor matches
+* manage match states
+* review submitted results
+* handle operational exceptions
+* review evidence
+* assist with disputes
+* record penalties
+* monitor competition activity
+
+Operators must not automatically receive unrestricted platform administration access.
+
+---
+
+## 3.4 Club Manager
+
+Club-level management role.
+
+Club managers are **not platform administrators**.
+
+Their administrative capabilities are limited to the club functionality granted to them.
+
+---
+
+## 3.5 Player
+
+Players participate in competitions.
+
+Players do not configure league competitions.
+
+---
+
+# 4. Admin Navigation
+
+The Admin application should be organized around league operations rather than individual database entities.
+
+```text
+Admin
+│
+├── Dashboard
+│
+├── Leagues
+│   └── League
+│       ├── Overview
+│       ├── Seasons
+│       └── Operators
+│
+├── Seasons
+│   └── Season
+│       ├── Overview
+│       ├── Configuration
+│       ├── Registration
+│       ├── Participants
+│       ├── Roster
+│       ├── Fixtures
+│       ├── Matches
+│       ├── Results
+│       ├── Standings
+│       ├── Playoffs
+│       ├── Disputes
+│       ├── Penalties
+│       └── Audit
+│
+└── Platform Administration
+    ├── Users
+    ├── Roles
+    └── Audit
+```
+
+The exact navigation implementation may evolve, but the operational grouping should remain.
+
+---
+
+# 5. Admin Dashboard
+
+The Admin Dashboard is the operational overview of the platform.
+
+It must answer:
+
+* What competitions are currently running?
+* What requires attention?
+* What matches are active?
+* What results require verification?
+* What disputes are unresolved?
+* What penalties are pending?
+* What registrations are open?
+* Which seasons are approaching critical deadlines?
+* Are there operational failures?
+
+### Dashboard sections
+
+#### Active competitions
+
+Display:
+
+* league
+* season
+* status
+* participant count
+* active divisions
+* current competition stage
+* matches completed
+* matches pending
+* outstanding issues
+
+#### Operational alerts
+
+Examples:
+
+* result awaiting confirmation
+* disputed match
+* unresolved penalty
+* failed fixture generation
+* incomplete roster
+* approaching registration deadline
+* match deadline approaching
+* missing schedule
+* playoff action required
+
+#### Quick actions
+
+Examples:
+
+* Create Season
+* Manage Registration
+* Review Participants
+* Generate Fixtures
+* Review Results
+* Review Disputes
+* Manage Penalties
+
+The dashboard should prioritize **work requiring action**, not merely display statistics.
+
+---
+
+# 6. League Management
+
+A league is the organizational competition container.
+
+The Admin system must support the league layer separately from individual seasons.
+
+## League capabilities
+
+Authorized users should be able to:
+
+* create league
+* view league
+* update league configuration
+* activate/deactivate league where applicable
+* view seasons belonging to league
+* manage assigned operators
+* view league-level history
+
+### League identity
+
+Minimum conceptual information:
+
+* league name
+* description
+* status
+* region/scope
+* operating configuration
+* assigned operators
+* creation metadata
+
+### Important rule
+
+A season belongs to a league.
+
+The Admin system must not treat a season as an isolated global object if the final platform architecture requires reusable leagues.
+
+---
+
+# 7. Season Management
+
+A season is an operational competition cycle within a league.
+
+The season is the primary Admin workspace.
+
+## Season lifecycle
+
+```text
+DRAFT
+  │
+  ▼
+REGISTRATION_OPEN
+  │
+  ▼
+REGISTRATION_CLOSED
+  │
+  ▼
+ROSTER_LOCKED
+  │
+  ▼
+ACTIVE
+  │
+  ├──────────────► COMPLETED
+  │
+  ▼
+PLAYOFFS
+  │
+  ▼
+COMPLETED
+  │
+  ▼
+ARCHIVED
+```
+
+Archiving may also be available from earlier states where permitted by policy.
+
+---
+
+# 8. Season Creation
+
+Authorized administrators must be able to create a season without developer intervention.
+
+Required information:
+
+* season name
+* description
+* start date
+* end date
+* league association
+* competition configuration
+
+Creation initially places the season in:
+
+```text
+DRAFT
+```
+
+The Admin must be able to continue configuring the season before registration opens.
+
+---
+
+# 9. Season Configuration
+
+The configuration workspace defines how the competition will operate.
+
+Configuration includes:
+
+* season dates
+* registration window
+* divisions
+* division type
+* division format
+* division capacity where applicable
+* competition format
+* scheduling configuration
+* participation rules
+* match configuration
+* playoff configuration
+* operational rules
+
+### Configuration principle
+
+Configuration must be completed **before the competition is activated**.
+
+Changes to sensitive competition configuration after participants or fixtures exist must be restricted and audited.
+
+---
+
+# 10. Division Management
+
+A season may contain one or more divisions.
+
+Admin must be able to:
+
+* create division
+* update division
+* deactivate division
+* view division participants
+* configure competition format
+* configure capacity
+* configure division-specific settings
+
+Supported MVP competition formats include:
+
+```text
+ROUND_ROBIN_SINGLE
+ROUND_ROBIN_DOUBLE
+```
+
+### Division requirements
+
+A division must have:
+
+* unique name within its season
+* valid format
+* valid capacity if capacity is configured
+* at least two eligible active participants before competition activation
+
+---
+
+# 11. Registration Management
+
+Registration is controlled by Admin.
+
+Admin must be able to:
+
+* open registration
+* view registration status
+* monitor registration
+* view participant count
+* inspect participant eligibility
+* close registration
+* review final participants
+* manage permitted administrative exceptions
+
+Registration must not depend on manual database intervention.
+
+---
+
+# 12. Participant Management
+
+The participant workspace is where Admin controls the competitive roster.
+
+Admin must be able to:
+
+* view participants
+* filter participants
+* inspect player details
+* see registration timestamp
+* see participant status
+* see division
+* see seed where assigned
+* withdraw/remove participants where policy permits
+* perform authorized administrative overrides
+* view participation history
+
+### Rules
+
+The system must prevent:
+
+* duplicate participation
+* invalid players
+* participation outside the registration window
+* unauthorized modifications after roster lock
+
+Administrative overrides must be:
+
+* permission-controlled
+* auditable
+* reasoned where appropriate
+
+---
+
+# 13. Roster Lock
+
+Roster lock is a formal competition milestone.
+
+When the roster is locked:
+
+* participant composition becomes fixed
+* normal registration changes stop
+* fixture generation becomes possible
+* sensitive roster changes require authorized exception handling
+
+Admin must explicitly perform:
+
+```text
+Lock Roster
+```
+
+The system must validate:
+
+* valid season state
+* active division(s)
+* minimum participant requirements
+* participant validity
+
+Roster lock must generate an audit event.
+
+---
+
+# 14. Fixture Management
+
+Fixture management is a core Admin responsibility.
+
+The system must support:
+
+* fixture generation
+* fixture review
+* fixture listing
+* fixture filtering
+* fixture scheduling
+* fixture rescheduling where permitted
+* fixture cancellation/voiding where permitted
+* fixture status
+* fixture history
+
+### Generation
+
+For round-robin competition:
+
+```text
+N players
+→ round-robin schedule
+→ fixtures
+→ match records
+```
+
+The generated schedule must be deterministic and reviewable before competition activation.
+
+### Critical rule
+
+**Fixture generation must not be the same thing as fixture activation.**
+
+Admin should be able to:
+
+1. lock roster
+2. generate schedule
+3. inspect schedule
+4. correct permitted scheduling issues
+5. approve/activate competition
+
+---
+
+# 15. Scheduling
+
+Scheduling rules must be explicitly configurable.
+
+The Admin system must not silently assume:
+
+* one round equals one week
+* one player plays exactly once per week
+* all fixtures occur simultaneously
+* every fixture has the same time
+
+Scheduling must support the actual competition policy defined for the league.
+
+The scheduling configuration must therefore be treated as a first-class development requirement.
+
+---
+
+# 16. Match Operations
+
+A match is the operational execution of a fixture.
+
+Admin must be able to monitor and, where authorized, control match lifecycle.
+
+Canonical lifecycle:
+
+```text
+SCHEDULED
+    ↓
+CHECK_IN_OPEN
+    ↓
+IN_PROGRESS
+    ↓
+RESULT_SUBMITTED
+    ↓
+CONFIRMED
+    ↓
+COMPLETED
+```
+
+Exceptional states may include:
+
+```text
+CANCELLED
+VOID
+FORFEIT
+NO_SHOW
+DISPUTED
+```
+
+### Admin capabilities
+
+Admin/operator may need to:
+
+* open check-in
+* monitor check-in
+* start match
+* monitor match
+* review result
+* confirm result
+* cancel match
+* void match
+* record forfeit
+* record no-show
+* reopen/review exceptional match
+* correct administrative errors
+
+Every sensitive state change must be auditable.
+
+---
+
+# 17. Result Management
+
+Result management controls the transition from player-submitted result to official competition result.
+
+### Result flow
+
+```text
+Player submits result
+        ↓
+Opponent confirmation
+        ↓
+Confirmed result
+        ↓
+Standings recalculation
+```
+
+Where confirmation fails:
+
+```text
+Result
+  ↓
+Rejected / Disputed
+  ↓
+Operator review
+  ↓
+Decision
+  ↓
+Confirmed / Corrected / Voided
+```
+
+### Admin result workspace
+
+Admin should see:
+
+* match
+* players
+* submitted score
+* submitting player
+* submission timestamp
+* evidence
+* opponent confirmation status
+* dispute status
+* final decision
+* audit history
+
+Confirmed results are authoritative for standings.
+
+---
+
+# 18. Standings Management
+
+Standings are derived from official confirmed results.
+
+Admin should be able to:
+
+* view standings
+* filter by division
+* inspect player records
+* inspect result contribution
+* view ranking movement
+* inspect tie-break calculations
+* identify anomalies
+
+Admin should **not normally manually edit standings rows**.
+
+If a correction is required:
+
+```text
+Correct the underlying official result
+        ↓
+Recalculate standings
+```
+
+This preserves the integrity of competition history.
+
+---
+
+# 19. Playoff Management
+
+For NGL Professional MVP, playoffs follow the defined Top-4 structure.
+
+```text
+Top 4
+ │
+ ├── Semi-final 1
+ ├── Semi-final 2
+ │
+ ▼
+Final
+ │
+ ▼
+Champion
+```
+
+The Admin system must support:
+
+* qualification
+* playoff seeding
+* bracket creation
+* bracket review
+* bracket locking
+* playoff match management
+* semifinal results
+* final result
+* champion declaration
+
+### Bracket rule
+
+Once playoff matches begin, the bracket must be locked.
+
+Changes after locking require explicit authorized exception handling and audit records.
+
+---
+
+# 20. Dispute Management
+
+Disputes are an operational workflow, not simply a database record.
+
+Admin must be able to:
+
+* view disputes
+* filter disputes
+* inspect match context
+* inspect submitted results
+* inspect evidence
+* review player statements
+* assign/review case
+* change dispute status
+* record decision
+* record resolution
+* preserve audit history
+
+Potential states may include:
+
+```text
+OPEN
+UNDER_REVIEW
+RESOLVED
+REJECTED
+CLOSED
+```
+
+Exact state definitions should be finalized against the canonical competition rules before implementation.
+
+---
+
+# 21. Penalty Management
+
+Admin must be able to manage competitive penalties.
+
+Capabilities:
+
+* create penalty
+* view penalties
+* inspect affected player/club/match
+* assign penalty type
+* apply penalty
+* change penalty status
+* revoke/correct penalty where authorized
+* record reason
+* preserve audit history
+
+Penalties must be capable of affecting competition outcomes where the competition rules define such effects.
+
+---
+
+# 22. Audit Management
+
+Auditability is a core requirement.
+
+The system must record sensitive administrative actions.
+
+Examples:
+
+* season created
+* season configuration changed
+* registration opened
+* registration closed
+* participant added/removed
+* roster locked
+* fixtures generated
+* fixture rescheduled
+* match cancelled
+* result confirmed
+* result corrected
+* dispute resolved
+* penalty applied
+* playoff bracket locked
+* season completed
+* season archived
+* role changed
+* permission-sensitive administrative override
+
+Audit records should capture, where applicable:
+
+* actor
+* action
+* entity
+* entity ID
+* previous state
+* new state
+* timestamp
+* reason
+* relevant metadata
+
+Audit history must be immutable from normal Admin workflows.
+
+---
+
+# 23. RBAC Model
+
+Authorization should be capability-based.
+
+Current platform permission categories include:
+
+```text
+MANAGE_USERS
+MANAGE_ROLES
+MANAGE_SEASONS
+MANAGE_MATCHES
+MANAGE_RESULTS
+MANAGE_DISPUTES
+MANAGE_PENALTIES
+MANAGE_CLUBS
+VIEW_AUDIT
+VIEW_ADMIN_DASHBOARD
+```
+
+These permissions form the initial authorization vocabulary.
+
+The final role-to-permission mapping must be reviewed against the actual operating model before implementation.
+
+### Principle
+
+Do not grant permissions merely because a user has an "admin-looking" role.
+
+Every sensitive operation must be protected at the API/service layer.
+
+UI hiding is not authorization.
+
+---
+
+# 24. API Requirements
+
+The Admin UI must have corresponding backend capabilities.
+
+At minimum, the backend must support operational APIs for:
+
+### League
+
+```text
+create league
+list leagues
+get league
+update league
+manage league operators
+```
+
+### Season
+
+```text
+create season
+list seasons
+get season
+update season
+publish/open registration
+close registration
+lock roster
+activate season
+start playoffs
+complete season
+archive season
+```
+
+### Division
+
+```text
+create division
+update division
+deactivate division
+list divisions
+```
+
+### Participants
+
+```text
+list participants
+register participant
+withdraw participant
+administrative participant override
+```
+
+### Fixtures
+
+```text
+generate fixtures
+list fixtures
+get fixture
+update schedule
+reschedule fixture
+cancel/void fixture where permitted
+```
+
+### Matches
+
+```text
+list matches
+get match
+create/manual match where authorized
+manage match lifecycle
+```
+
+### Results
+
+```text
+list pending results
+view result
+confirm result
+reject/review result
+correct official result where authorized
+```
+
+### Standings
+
+```text
+view standings
+view ranking details
+recalculate standings where operationally required
+```
+
+### Playoffs
+
+```text
+generate bracket
+review bracket
+lock bracket
+manage playoff matches
+declare champion
+```
+
+### Disputes
+
+```text
+list disputes
+get dispute
+create dispute
+update dispute status
+resolve dispute
+```
+
+### Penalties
+
+```text
+list penalties
+get penalty
+create penalty
+update penalty status
+```
+
+### Audit
+
+```text
+list audit events
+filter audit events
+inspect entity history
+```
+
+---
+
+# 25. UI Requirements
+
+The Admin UI should be task-oriented.
+
+It should not expose raw database operations as the primary user experience.
+
+## Season workspace
+
+The season workspace is the most important Admin screen.
+
+It should provide:
+
+```text
+Season Header
+    ├── Name
+    ├── Status
+    ├── Dates
+    └── Primary Action
+
+Overview
+    ├── Participants
+    ├── Divisions
+    ├── Fixtures
+    ├── Matches
+    ├── Results
+    ├── Disputes
+    └── Penalties
+
+Operational Navigation
+    ├── Configuration
+    ├── Registration
+    ├── Participants
+    ├── Roster
+    ├── Fixtures
+    ├── Matches
+    ├── Results
+    ├── Standings
+    ├── Playoffs
+    ├── Disputes
+    ├── Penalties
+    └── Audit
+```
+
+The current generic `/seasons` list should evolve into an entry point to this workspace rather than remain the primary management interface.
+
+---
+
+# 26. State-Driven UI
+
+Admin actions must be determined by the current state of the entity.
+
+Example:
+
+### DRAFT
+
+Available:
+
+```text
+Edit Configuration
+Manage Divisions
+Open Registration
+Archive
+```
+
+### REGISTRATION_OPEN
+
+Available:
+
+```text
+Manage Registration
+Manage Participants
+Close Registration
+Archive
+```
+
+### REGISTRATION_CLOSED
+
+Available:
+
+```text
+Review Participants
+Lock Roster
+Archive
+```
+
+### ROSTER_LOCKED
+
+Available:
+
+```text
+Generate Fixtures
+Review Schedule
+Activate
+Archive
+```
+
+### ACTIVE
+
+Available:
+
+```text
+Monitor Matches
+Review Results
+Manage Disputes
+Manage Penalties
+View Standings
+Start Playoffs
+Complete
+```
+
+### PLAYOFFS
+
+Available:
+
+```text
+Manage Bracket
+Manage Playoff Matches
+Review Results
+Declare Champion
+Complete
+```
+
+### COMPLETED
+
+Available:
+
+```text
+Review History
+Archive
+```
+
+### ARCHIVED
+
+Read-only.
+
+---
+
+# 27. Operational Safeguards
+
+The Admin system must prevent invalid transitions.
+
+Examples:
+
+* cannot activate without a locked roster
+* cannot activate without required fixtures
+* cannot lock roster with insufficient participants
+* cannot modify core division configuration after roster lock
+* cannot start playoffs without qualification data
+* cannot declare champion before required playoff completion
+* cannot alter confirmed competition results without authorized correction
+* cannot modify archived seasons through normal workflows
+
+Invalid operations must return meaningful errors.
+
+---
+
+# 28. Transactional Requirements
+
+Critical operations must be atomic.
+
+Examples:
+
+### Registration
+
+```text
+validate
+→ capacity check
+→ duplicate check
+→ create participant
+→ audit/event
+```
+
+The capacity constraint must remain safe under concurrent requests.
+
+### Roster lock
+
+```text
+validate
+→ verify participant state
+→ lock roster
+→ audit/event
+```
+
+### Fixture generation
+
+```text
+validate roster
+→ generate schedule
+→ create weeks
+→ create fixtures
+→ create matches
+→ create participants
+→ emit event
+```
+
+Partial fixture generation must not leave the competition in an inconsistent state.
+
+---
+
+# 29. Event / Audit Requirements
+
+Operational state changes should generate domain/outbox events where appropriate.
+
+Examples:
+
+```text
+season.created
+season.registration_opened
+season.registration_closed
+season.roster_locked
+season.fixtures_generated
+season.activated
+match.result_submitted
+match.result_confirmed
+dispute.created
+dispute.resolved
+penalty.applied
+season.playoffs_started
+season.completed
+season.archived
+```
+
+The exact event vocabulary should be standardized during implementation.
+
+---
+
+# 30. Error Handling
+
+Admin errors must be operationally useful.
+
+Bad:
+
+```text
+400 Bad Request
+```
+
+Better:
+
+```text
+Cannot activate season.
+
+Roster must be locked before activation.
+```
+
+Better still where applicable:
+
+```text
+Cannot activate season.
+
+Division "Professional" has only 1 active participant.
+Minimum required: 2.
+```
+
+Errors should explain:
+
+* what failed
+* why it failed
+* what the administrator must do next
+
+---
+
+# 31. Admin Operational Workflow
+
+The complete intended Admin journey is:
+
+```text
+LOGIN
+  ↓
+ADMIN DASHBOARD
+  ↓
+CREATE LEAGUE
+  ↓
+CREATE SEASON
+  ↓
+CONFIGURE SEASON
+  ↓
+CREATE / CONFIGURE DIVISIONS
+  ↓
+OPEN REGISTRATION
+  ↓
+MONITOR PARTICIPANTS
+  ↓
+CLOSE REGISTRATION
+  ↓
+REVIEW FINAL PARTICIPANTS
+  ↓
+LOCK ROSTER
+  ↓
+GENERATE FIXTURES
+  ↓
+REVIEW SCHEDULE
+  ↓
+ACTIVATE SEASON
+  ↓
+MONITOR MATCHES
+  ↓
+REVIEW RESULTS
+  ↓
+HANDLE DISPUTES / PENALTIES
+  ↓
+MAINTAIN STANDINGS
+  ↓
+START PLAYOFFS
+  ↓
+LOCK PLAYOFF BRACKET
+  ↓
+RUN SEMIFINALS
+  ↓
+RUN FINAL
+  ↓
+DECLARE CHAMPION
+  ↓
+COMPLETE SEASON
+  ↓
+ARCHIVE
+```
+
+This is the primary end-to-end Admin acceptance journey.
+
+---
+
+# 32. Player/Admin Boundary
+
+The Player system must not be responsible for creating competition structure.
+
+Player-facing functionality depends on Admin-created competition data.
+
+Therefore:
+
+```text
+Admin
+  ↓
+creates/configures competition
+  ↓
+opens registration
+  ↓
+creates eligible participants
+  ↓
+locks roster
+  ↓
+generates fixtures
+  ↓
+activates competition
+  ↓
+Player
+  ↓
+views competition
+  ↓
+checks in
+  ↓
+plays match
+  ↓
+submits result
+```
+
+This boundary is foundational to the architecture.
+
+---
+
+# 33. MVP Scope
+
+The Admin MVP must prioritize the minimum complete operating loop.
+
+### Must have
+
+* authentication
+* RBAC
+* Admin dashboard
+* league management
+* season creation
+* season configuration
+* division management
+* registration management
+* participant management
+* roster lock
+* fixture generation
+* fixture review
+* match operations
+* result verification
+* standings
+* dispute management
+* penalty management
+* playoff management
+* season completion
+* archive
+* audit
+
+### Can be simplified initially
+
+* advanced analytics
+* advanced reporting
+* bulk operations
+* sophisticated operator scheduling
+* advanced league branding
+* automated communication campaigns
+* advanced sponsor management
+* advanced tournament-style bracket customization
+
+The MVP should optimize for **operational completeness**, not feature count.
+
+---
+
+# 34. Non-Goals
+
+The Admin MVP is not intended to become:
+
+* a general ERP
+* a social network
+* a full CRM
+* a marketing automation system
+* a content management platform
+* a complex analytics warehouse
+* an esports broadcast control room
+
+Those capabilities may belong to later ecosystem/platform layers.
+
+---
+
+# 35. Definition of Done
+
+The Admin system is not considered operationally complete until an authorized administrator can perform the complete workflow without developer intervention:
+
+```text
+Create league
+→ Create season
+→ Configure season
+→ Create/configure division
+→ Open registration
+→ Manage participants
+→ Close registration
+→ Lock roster
+→ Generate fixtures
+→ Review schedule
+→ Activate season
+→ Operate matches
+→ Review/confirm results
+→ Resolve disputes
+→ Apply/manage penalties
+→ Maintain official standings
+→ Create/lock playoffs
+→ Run playoffs
+→ Declare champion
+→ Complete season
+→ Archive season
+```
+
+Every sensitive administrative action must be:
+
+* permission-controlled
+* validated
+* transactional where necessary
+* auditable
+* reflected correctly in the UI
+
+---
+
+# 36. Implementation Principle
+
+The implementation should proceed in vertical operational slices.
+
+Do not build dozens of disconnected CRUD pages.
+
+Each phase should produce a usable portion of the Admin operating system.
+
+Recommended implementation order:
+
+```text
+Phase 1
+Admin shell + authorization + dashboard
+
+Phase 2
+League + season management
+
+Phase 3
+Season configuration + divisions
+
+Phase 4
+Registration + participants + roster
+
+Phase 5
+Fixture generation + fixture management
+
+Phase 6
+Match operations + result verification
+
+Phase 7
+Standings + disputes + penalties
+
+Phase 8
+Playoffs
+
+Phase 9
+Audit + operational hardening
+
+Phase 10
+End-to-end verification
+```
+
+---
+
+# 37. Specification Status
+
+This document defines the **target Admin operating model**.
+
+It does not yet claim that the current codebase implements every capability described here.
+
+The next step is to compare this specification against:
+
+1. current Prisma schema
+2. current API controllers
+3. current services
+4. current authorization model
+5. current API clients
+6. current Admin pages
+7. current Season UI
+8. current Match/Fixture/Result UI
+9. current Notion canonical requirements
+
+The resulting comparison will produce the **Admin System Gap Matrix**.
+
+That matrix will determine the implementation backlog.
+
+---
+
+# 38. Governance Rule
+
+Until superseded by an explicitly approved version:
+
+**Admin System Specification v1 defines the target operating structure for the NGL Admin / Management system.**
+
+Implementation decisions must be evaluated against this specification.
+
+Where the specification conflicts with the canonical NGL MVP specification, the canonical NGL MVP specification takes precedence and this document must be updated.
