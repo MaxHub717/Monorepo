@@ -20,6 +20,7 @@ import { ParticipationModule } from './modules/participation/participation.modul
 import { FixtureModule } from './modules/fixture/fixture.module.js';
 import { EventModule } from './modules/events/event.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { PrismaModule } from './modules/prisma/prisma.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
 import { RedisModule } from './modules/redis/redis.module.js';
@@ -60,6 +61,7 @@ import { validate } from './config/env.validation.js';
     NotificationModule,
     ParticipationModule,
     FixtureModule,
+    AdminModule,
   ],
   controllers: [HealthController],
 })
