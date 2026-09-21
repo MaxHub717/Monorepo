@@ -2,7 +2,7 @@
 
 
 import { useState } from 'react';
-import { login } from '../auth-client';
+import { getCurrentUser, login } from '../auth-client';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -16,9 +16,17 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      // TODO: redirect to app
-      window.location.href = '/player/dashboard';
-    } catch (err: any) {
+
+const user = await getCurrentUser();
+
+if (user.roles?.includes('HQ_ADMIN')) {
+  window.location.href = '/admin/dashboard';
+} else {
+  window.location.href = '/player/dashboard';
+} 
+}
+
+catch (err: any) {
       setError(err?.message ?? 'Login failed');
     } finally {
       setLoading(false);

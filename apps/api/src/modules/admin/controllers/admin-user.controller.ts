@@ -198,7 +198,7 @@ export class AdminUserController {
    * Returns all available permissions in the system.
    * Required permissions: MANAGE_ROLES
    */
-  @Get('permissions', '/permissions')
+  @Get('permissions')
   @RequirePermission(PermissionName.MANAGE_ROLES)
   @HttpCode(200)
   async listPermissions(@CurrentUser() user: AuthUser) {
@@ -216,7 +216,7 @@ export class AdminUserController {
    * Returns all available roles in the system with their assigned permissions.
    * Required permissions: MANAGE_ROLES
    */
-  @Get('roles', '/roles')
+  @Get('roles')
   @RequirePermission(PermissionName.MANAGE_ROLES)
   @HttpCode(200)
   async listRoles(@CurrentUser() user: AuthUser) {

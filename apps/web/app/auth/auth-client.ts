@@ -51,6 +51,51 @@ export async function login(email: string, password: string) {
   });
 }
 
+export type AuthenticatedUser = {
+  id: string;
+  email: string;
+  username?: string;
+  roles: string[];
+  permissions: string[];
+};
+
+type CurrentUserApiResponse = {
+  id: string;
+  email: string;
+  username?: string;
+  account_status?: string;
+  email_verified_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  player_profile?: unknown;
+  user_roles?: Array<{
+    id: string;
+    role: {
+      id: string;
+      name: string;
+    };
+  }>;
+  permissions?: string[];
+};
+
+export async function getCurrentUser(): Promise<AuthenticatedUser> {
+  const response = await authFetch<{
+    success: boolean;
+    data: CurrentUserApiResponse;
+    error: null;
+  }>('/users/me');
+
+  const user = response.data;
+
+  return {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    roles: user.user_roles?.map((userRole) => userRole.role.name) ?? [],
+    permissions: user.permissions ?? [],
+  };
+}
+
 export async function register(
   email: string,
   username: string,
@@ -76,7 +121,7 @@ export async function register(
 }
 
 export async function logout(): Promise<void> {
-  await apiFetch<{ success: boolean }>('/auth/logout', {
+  await authFetch<{ success: boolean }>('/auth/logout', {
     method: 'POST',
   });
 }

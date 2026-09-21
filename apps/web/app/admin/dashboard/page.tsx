@@ -1,228 +1,126 @@
 import Link from 'next/link';
 import PageShell from '../../components/page-shell';
-import { requireRole } from '../../lib/auth-guard';
+import { requirePermission } from '../../lib/auth-guard';
+import { apiServerFetch } from '../../lib/api-server-client';
 import styles from './dashboard.module.css';
 
-/**
- * Admin Dashboard
- *
- * Entry point for platform administration and league management.
- * Separates concerns into two distinct sections:
- *
- * 1. Platform Administration - user/role/permission management, audit
- * 2. League Management - leagues, seasons, competition operations
- *
- * Navigation is populated only with operational/implemented areas.
- * Future features are documented but not exposed as navigation until ready.
- */
+type DashboardOverview = {
+  metrics: Record<'activeSeasons' | 'registrationOpen' | 'participants' | 'fixtures' | 'pendingResults' | 'activeMatches' | 'openDisputes' | 'pendingPenalties', number>;
+  activeSeasons: Array<{ id: string; name: string; status: string; startDate: string | null; endDate: string | null; participantCount: number; matchCount: number; divisionCount: number }>;
+  alerts: Array<{ type: string; title: string; count: number; href: string }>;
+  recentActivity: Array<{ id: string; entity_type: string; entity_id: string; action: string; actor_role: string | null; created_at: string }>;
+};
+
+const metricCards = [
+  ['activeSeasons', 'Active seasons', 'Running or preparing'],
+  ['registrationOpen', 'Open registration', 'Accepting participants'],
+  ['participants', 'Active participants', 'Across all divisions'],
+  ['activeMatches', 'Live matches', 'Currently in operation'],
+  ['pendingResults', 'Pending results', 'Awaiting verification'],
+  ['openDisputes', 'Open disputes', 'Need review'],
+  ['pendingPenalties', 'Pending penalties', 'Need a decision'],
+  ['fixtures', 'Fixtures', 'Generated in the system'],
+] as const;
+
+function formatDate(value: string | null) {
+  if (!value) return 'Date not set';
+  return new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(value));
+}
+
+function labelStatus(status: string) {
+  return status.replaceAll('_', ' ');
+}
+
 export default async function AdminDashboardPage() {
-  const user = await requireRole('HQ_ADMIN');
+  const user = await requirePermission('VIEW_ADMIN_DASHBOARD');
+  const overview = await apiServerFetch<DashboardOverview>('/admin/dashboard');
 
   return (
     <PageShell title="Admin Dashboard" subtitle="Platform administration and league operations.">
       <div className={styles.dashboardContainer}>
-        {/* Welcome Card */}
-        <div className={styles.welcomeCard}>
-          <h2>Welcome, {user.email}</h2>
-          <p>You have full administrative access to the NGL platform.</p>
-          <p className={styles.subtitle}>
-            Use the sections below to manage users, roles, leagues, seasons, and competition operations.
-          </p>
+          <section className={styles.welcomeCard}>
+            <p className={styles.eyebrow}>Operations centre</p>
+            <h2>Good to see you, {user.email}</h2>
+            <p className={styles.subtitle}>The latest competition signals and actions are collected here.</p>
+          </section>
+
+          <section className={styles.metricGrid} aria-label="Operational metrics">
+            {metricCards.map(([key, title, detail]) => (
+              <div className={styles.metricCard} key={key}>
+                <span className={styles.metricLabel}>{title}</span>
+                <strong className={styles.metricValue}>{overview.metrics[key]}</strong>
+                <span className={styles.metricDetail}>{detail}</span>
+              </div>
+            ))}
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHeading}>
+              <div><p className={styles.eyebrow}>Attention queue</p><h3 className={styles.sectionTitle}>What needs action</h3></div>
+              <span className={overview.alerts.length ? styles.queueStatus : styles.queueStatusQuiet}>{overview.alerts.length ? `${overview.alerts.length} items` : 'All clear'}</span>
+            </div>
+            {overview.alerts.length ? (
+              <div className={styles.alertList}>
+                {overview.alerts.map((alert) => (
+                  <Link href={alert.href} className={styles.alert} key={alert.type}>
+                    <span className={styles.alertMarker} />
+                    <span><strong>{alert.title}</strong><small>Open the relevant workspace</small></span>
+                    <b>{alert.count}</b>
+                  </Link>
+                ))}
+              </div>
+            ) : <div className={styles.emptyState}>No operational issues are waiting for review.</div>}
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHeading}>
+              <div><p className={styles.eyebrow}>Competition pulse</p><h3 className={styles.sectionTitle}>Active seasons</h3></div>
+              <Link href="/seasons" className={styles.textLink}>View all seasons</Link>
+            </div>
+            {overview.activeSeasons.length ? (
+              <div className={styles.seasonList}>
+                {overview.activeSeasons.map((season) => (
+                  <article className={styles.seasonRow} key={season.id}>
+                    <div className={styles.seasonIdentity}><span className={styles.statusDot} /><div><h4>{season.name}</h4><span>{formatDate(season.startDate)} - {formatDate(season.endDate)}</span></div></div>
+                    <span className={styles.statusBadge}>{labelStatus(season.status)}</span>
+                    <span className={styles.seasonStat}><b>{season.participantCount}</b> participants</span>
+                    <span className={styles.seasonStat}><b>{season.matchCount}</b> matches</span>
+                    <span className={styles.seasonStat}><b>{season.divisionCount}</b> divisions</span>
+                  </article>
+                ))}
+              </div>
+            ) : <div className={styles.emptyState}>No active seasons are currently configured.</div>}
+          </section>
+
+          <div className={styles.twoColumn}>
+            <section className={styles.section}>
+              <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>Governance</p><h3 className={styles.sectionTitle}>Recent activity</h3></div><Link href="/audit" className={styles.textLink}>Audit log</Link></div>
+              {overview.recentActivity.length ? <div className={styles.activityList}>{overview.recentActivity.map((entry) => <div className={styles.activityItem} key={entry.id}><span className={styles.activityTime}>{formatDate(entry.created_at)}</span><span><strong>{entry.action.replaceAll('_', ' ')}</strong><small>{entry.entity_type} {entry.entity_id.slice(0, 8)} · {entry.actor_role ?? 'System'}</small></span></div>)}</div> : <div className={styles.emptyState}>No audit activity yet.</div>}
+            </section>
+
+            <section className={styles.section}>
+              <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>Shortcuts</p><h3 className={styles.sectionTitle}>Quick actions</h3></div></div>
+              <div className={styles.actionList}>
+                <Link href="/seasons" className={styles.actionLink}>Manage seasons <span>↗</span></Link>
+                <Link href="/results" className={styles.actionLink}>Review results <span>↗</span></Link>
+                <Link href="/disputes" className={styles.actionLink}>Review disputes <span>↗</span></Link>
+                <Link href="/penalties" className={styles.actionLink}>Manage penalties <span>↗</span></Link>
+              </div>
+            </section>
+          </div>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>Platform administration</p><h3 className={styles.sectionTitle}>Access and governance</h3></div></div>
+            <div className={styles.adminLinks}>
+              <Link href="/admin/rbac" className={styles.adminLink}><strong>Users & RBAC</strong><span>Manage roles and access assignments</span></Link>
+              <Link href="/audit" className={styles.adminLink}><strong>Audit logs</strong><span>Review administrative history</span></Link>
+              <div className={styles.adminLinkDisabled}><strong>Roles & permissions</strong><span>Available in a future admin workflow</span></div>
+            </div>
+          </section>
         </div>
-
-        {/* PLATFORM ADMINISTRATION SECTION */}
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Platform Administration</h3>
-          <p className={styles.sectionDescription}>
-            Manage platform-level configuration, users, roles, permissions, and access logs.
-          </p>
-
-          <div className={styles.cardGrid}>
-            {/* Users & RBAC */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Users & RBAC</h4>
-              </div>
-              <p className={styles.cardDescription}>Manage platform users, assign roles, and control permissions.</p>
-              <Link href="/admin/users" className={styles.cardLink}>
-                Manage Users →
-              </Link>
-            </div>
-
-            {/* Audit Logs */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Audit Logs</h4>
-              </div>
-              <p className={styles.cardDescription}>Review administrative actions and access history.</p>
-              <Link href="/admin/audit" className={styles.cardLink}>
-                View Audit Logs →
-              </Link>
-            </div>
-
-            {/* Roles & Permissions */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Roles & Permissions</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Configure available roles and the permissions they grant.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon</span>
-            </div>
-          </div>
-        </section>
-
-        {/* LEAGUE MANAGEMENT SECTION */}
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>League Management</h3>
-          <p className={styles.sectionDescription}>
-            Create and operate leagues, manage seasons, configure competitions, and oversee all league activities.
-          </p>
-
-          <div className={styles.cardGrid}>
-            {/* Leagues */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Leagues</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Create new leagues and manage league-level configuration and operators.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon (ADM-003)</span>
-            </div>
-
-            {/* Seasons */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Seasons</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Manage season lifecycle: create, configure, open/close registration, lock rosters, operate matches.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon (ADM-004+)</span>
-            </div>
-
-            {/* Participants */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Participants</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Manage player registration, roster locking, and division assignments.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon (ADM-009)</span>
-            </div>
-
-            {/* Fixtures */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Fixtures & Scheduling</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Generate, review, and adjust fixture schedules for divisions.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon</span>
-            </div>
-
-            {/* Results */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Results & Standings</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Review submitted results, verify scores, and maintain official standings.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon</span>
-            </div>
-
-            {/* Disputes */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Disputes</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Review contested matches and resolve disputes with evidence review.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon</span>
-            </div>
-
-            {/* Penalties */}
-            <div className={styles.card}>
-              <div className={styles.cardHeader}>
-                <h4>Penalties</h4>
-              </div>
-              <p className={styles.cardDescription}>
-                Issue and manage warnings, point deductions, suspensions, and bans.
-              </p>
-              <span className={styles.comingSoon}>Coming Soon</span>
-            </div>
-          </div>
-        </section>
-
-        {/* IMPLEMENTATION STATUS */}
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Implementation Status</h3>
-          <div className={styles.statusCard}>
-            <p>
-              The Admin Dashboard is operational. Featured sections reflect the current implementation status:
-            </p>
-            <ul className={styles.statusList}>
-              <li>
-                <strong>ADM-001</strong>: Define Admin route and authorization contract ✅
-              </li>
-              <li>
-                <strong>ADM-002</strong>: Build operational Admin Dashboard (this page) ✅
-              </li>
-              <li>
-                <strong>ADM-003+</strong>: Additional admin workflows (in progress)
-              </li>
-            </ul>
-            <p>
-              Navigation links above point to implemented functionality. "Coming Soon" items indicate areas under development.
-            </p>
-          </div>
-        </section>
-
-        {/* QUICK REFERENCE */}
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Quick Reference</h3>
-          <div className={styles.referenceGrid}>
-            <div className={styles.referenceCard}>
-              <h4>Available API Endpoints</h4>
-              <code className={styles.code}>GET /api/v1/admin/users</code>
-              <code className={styles.code}>GET /api/v1/admin/audit</code>
-              <code className={styles.code}>GET /api/v1/admin/seasons</code>
-              <p className={styles.smallText}>Full API documentation in implementation notes.</p>
-            </div>
-
-            <div className={styles.referenceCard}>
-              <h4>Your Permissions</h4>
-              <ul className={styles.permissionsList}>
-                {user.permissions?.map((perm) => (
-                  <li key={perm}>
-                    <code>{perm}</code>
-                  </li>
-                ))}
-                {!user.permissions || user.permissions.length === 0 ? (
-                  <li>No specific permissions (superuser via role)</li>
-                ) : null}
-              </ul>
-            </div>
-
-            <div className={styles.referenceCard}>
-              <h4>Your Roles</h4>
-              <ul className={styles.rolesList}>
-                {user.roles?.map((role) => (
-                  <li key={role}>
-                    <code>{role}</code>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-      </div>
     </PageShell>
   );
 }
+
+
+
