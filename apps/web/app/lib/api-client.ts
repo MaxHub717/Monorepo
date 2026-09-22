@@ -342,6 +342,8 @@ export async function listClubs(): Promise<ClubSummary[]> {
 
 export type SeasonSummary = {
   id: string;
+  description?: string | null;
+  league?: { id: string; name: string; status: string };
   league_id?: string;
   name: string;
   status: string;
@@ -356,6 +358,12 @@ export type SeasonSummary = {
     capacity: number;
     active: boolean;
   }>;
+};
+
+export type SeasonOverview = SeasonSummary & {
+  counts: { participants: number; divisions: number; fixtures: number; matches: number; pendingResults: number; disputes: number; penalties: number };
+  divisions: Array<{ id: string; name: string; type: string; format: string; capacity: number | null; active: boolean; _count: { participants: number; fixtures: number; matches: number; standings_rows: number } }>;
+  nextAction: { label: string; endpoint: string; reason: string } | null;
 };
 
 export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number }): Promise<SeasonSummary> {
@@ -587,4 +595,12 @@ export async function assignLeagueOperator(leagueId: string, userId: string, reg
 
 export async function removeLeagueOperator(leagueId: string, userId: string): Promise<unknown> {
   return apiFetch<unknown>(`/admin/leagues/${leagueId}/operators/${userId}`, { method: 'DELETE' });
+}
+
+export async function getSeasonOverview(seasonId: string): Promise<SeasonOverview> {
+  return apiFetch<SeasonOverview>(`/seasons/${seasonId}/overview`, { cache: 'no-store' });
+}
+
+export async function lockSeasonRoster(seasonId: string): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>(`/seasons/${seasonId}/lock-roster`, { method: 'POST' });
 }

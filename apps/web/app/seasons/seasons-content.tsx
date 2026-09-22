@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import PageShell from '../components/page-shell';
-import { listSeasons, publishSeason, closeSeasonRegistration, activateSeason, startSeasonPlayoffs, completeSeason, archiveSeason, createDivision, updateDivision, deactivateDivision, SeasonSummary } from '../lib/api-client';
+import { listSeasons, publishSeason, closeSeasonRegistration, lockSeasonRoster, activateSeason, startSeasonPlayoffs, completeSeason, archiveSeason, SeasonSummary } from '../lib/api-client';
 
 export default function SeasonsContent() {
   const [seasons, setSeasons] = useState<SeasonSummary[]>([]);
@@ -52,6 +52,15 @@ export default function SeasonsContent() {
     }
   };
 
+  const handleLock = async (id: string) => {
+    try {
+      await lockSeasonRoster(id);
+      setSeasons(await listSeasons());
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to lock roster');
+    }
+  };
+
   const handleStartPlayoffs = async (id: string) => {
     try {
       await startSeasonPlayoffs(id);
@@ -89,7 +98,8 @@ export default function SeasonsContent() {
         <div className="season-list">
           {seasons.map((s) => (
             <article key={s.id} className="season-card">
-              <h3>{s.name}</h3>
+              <h3><Link href={`/seasons/${s.id}`}>{s.name}</Link></h3>
+              {s.league && <p>League: {s.league.name}</p>}
               <p>Status: {s.status}</p>
               <p>
                 Registration: {s.registration_open_at ?? '—'} → {s.registration_close_at ?? '—'}
@@ -97,7 +107,8 @@ export default function SeasonsContent() {
               <div className="actions">
                 {s.status === 'DRAFT' && <button onClick={() => handlePublish(s.id)}>Publish (open registration)</button>}
                 {s.status === 'REGISTRATION_OPEN' && <button onClick={() => handleClose(s.id)}>Close Registration</button>}
-                {s.status === 'REGISTRATION_CLOSED' && <button onClick={() => handleActivate(s.id)}>Activate Season</button>}
+                {s.status === 'REGISTRATION_CLOSED' && <button onClick={() => handleLock(s.id)}>Lock Roster</button>}
+                {s.status === 'ROSTER_LOCKED' && <button onClick={() => handleActivate(s.id)}>Activate Season</button>}
                 {s.status === 'ACTIVE' && <button onClick={() => handleStartPlayoffs(s.id)}>Start Playoffs</button>}
                 {s.status === 'PLAYOFFS' && <button onClick={() => handleComplete(s.id)}>Complete Season</button>}
                 {s.status !== 'ARCHIVED' && <button onClick={() => handleArchive(s.id)}>Archive</button>}

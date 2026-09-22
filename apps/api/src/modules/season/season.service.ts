@@ -51,6 +51,64 @@ export class SeasonService {
     });
   }
 
+  async getOverview(seasonId: string) {
+    const season = await this.prisma.season.findUnique({
+      where: { id: seasonId },
+      include: {
+        league: { select: { id: true, name: true, status: true } },
+        divisions: {
+          include: {
+            _count: { select: { participants: true, fixtures: true, matches: true, standings_rows: true } },
+          },
+          orderBy: { name: 'asc' },
+        },
+        _count: { select: { divisions: true, participants: true, matches: true, standings_rows: true } },
+      },
+    });
+    if (!season) throw new NotFoundException('Season not found');
+
+    const [fixtureCount, pendingResultCount, disputeCount, penaltyCount] = await Promise.all([
+      this.prisma.fixture.count({ where: { division: { season_id: seasonId } } }),
+      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['SUBMISSION_PENDING', 'UNDER_REVIEW'] } } }),
+      this.prisma.dispute.count({ where: { match: { season_id: seasonId }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } } }),
+      this.prisma.penalty.count({ where: { match: { season_id: seasonId }, status: { in: ['PROPOSED', 'UNDER_REVIEW', 'APPROVED'] } } }),
+    ]);
+
+    const nextAction = {
+      DRAFT: { label: 'Open registration', endpoint: 'publish', reason: 'Complete configuration before accepting participants.' },
+      REGISTRATION_OPEN: { label: 'Close registration', endpoint: 'close-registration', reason: 'Finalize the participant pool when registration ends.' },
+      REGISTRATION_CLOSED: { label: 'Lock roster', endpoint: 'lock-roster', reason: 'Verify eligible participants before generating fixtures.' },
+      ROSTER_LOCKED: { label: 'Activate season', endpoint: 'activate', reason: 'Ensure the fixture schedule is generated before activation.' },
+      ACTIVE: { label: 'Start playoffs', endpoint: 'start-playoffs', reason: 'Move to playoffs after the regular season is complete.' },
+      PLAYOFFS: { label: 'Complete season', endpoint: 'complete', reason: 'Finalize the champion and season record.' },
+      COMPLETED: { label: 'Archive season', endpoint: 'archive', reason: 'Make the completed season historical and read-only.' },
+      ARCHIVED: null,
+    }[season.status];
+
+    return {
+      id: season.id,
+      name: season.name,
+      description: season.description,
+      status: season.status,
+      start_date: season.start_date,
+      end_date: season.end_date,
+      registration_open_at: season.registration_open_at,
+      registration_close_at: season.registration_close_at,
+      league: season.league,
+      counts: {
+        participants: season._count.participants,
+        divisions: season._count.divisions,
+        fixtures: fixtureCount,
+        matches: season._count.matches,
+        pendingResults: pendingResultCount,
+        disputes: disputeCount,
+        penalties: penaltyCount,
+      },
+      divisions: season.divisions,
+      nextAction,
+    };
+  }
+
   async createSeason(
     dto: CreateSeasonDto,
     actor?: { id?: string; role?: string; requestId?: string; correlationId?: string },

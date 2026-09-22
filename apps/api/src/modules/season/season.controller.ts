@@ -14,6 +14,13 @@ export class SeasonController {
     return this.seasonService.listSeasons();
   }
 
+  @Get(':id/overview')
+  @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
+  @RequirePermission(PermissionName.MANAGE_SEASONS)
+  getOverview(@Param('id') id: string) {
+    return this.seasonService.getOverview(id);
+  }
+
   @Post()
   @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
   @RequirePermission(PermissionName.MANAGE_SEASONS)
