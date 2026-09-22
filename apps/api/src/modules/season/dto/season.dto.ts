@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreateSeasonDto {
   @IsUUID('4')
@@ -8,11 +8,33 @@ export class CreateSeasonDto {
   @IsNotEmpty()
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  description?: string;
+
   @IsDateString()
   startDate!: string;
 
   @IsDateString()
   endDate!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  divisionName?: string;
+
+  @IsOptional()
+  @IsIn(['AMATEUR', 'COMPETITIVE', 'ELITE', 'VERIFIED_PRO'])
+  divisionType?: string;
+
+  @IsOptional()
+  @IsIn(['ROUND_ROBIN_SINGLE', 'ROUND_ROBIN_DOUBLE'])
+  divisionFormat?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  divisionCapacity?: number;
 }
 
 export class CreateDivisionDto {

@@ -358,7 +358,7 @@ export type SeasonSummary = {
   }>;
 };
 
-export async function createSeason(payload: { leagueId: string; name: string; startDate: string; endDate: string }): Promise<SeasonSummary> {
+export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
 

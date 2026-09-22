@@ -73,6 +73,7 @@ export class SeasonService {
         data: {
           league_id: dto.leagueId,
           name: dto.name.trim(),
+          description: dto.description?.trim() || null,
           status: 'DRAFT',
           start_date: startDate,
           end_date: endDate,
@@ -82,7 +83,10 @@ export class SeasonService {
       const division = await tx.division.create({
         data: {
           season_id: season.id,
-          name: 'Division 1',
+          name: dto.divisionName?.trim() || 'Division 1',
+          type: (dto.divisionType as DivisionType | undefined) ?? DivisionType.AMATEUR,
+          format: (dto.divisionFormat as CompetitionFormat | undefined) ?? CompetitionFormat.ROUND_ROBIN_SINGLE,
+          capacity: dto.divisionCapacity ?? null,
           description: 'Default player division',
         },
       });

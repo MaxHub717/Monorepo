@@ -51,6 +51,7 @@ ALTER TABLE "seasons" ALTER COLUMN "league_id" SET NOT NULL;
 -- Season names are unique within a league, not globally across the platform.
 DROP INDEX IF EXISTS "seasons_name_key";
 CREATE UNIQUE INDEX "seasons_league_id_name_key" ON "seasons"("league_id", "name");
+CREATE UNIQUE INDEX "leagues_name_key" ON "leagues"("name");
 CREATE INDEX "leagues_status_idx" ON "leagues"("status");
 CREATE INDEX "seasons_league_id_status_idx" ON "seasons"("league_id", "status");
 CREATE UNIQUE INDEX "league_operators_league_id_user_id_key" ON "league_operators"("league_id", "user_id");
