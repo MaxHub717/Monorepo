@@ -5,6 +5,7 @@ import { AdminUserController } from './controllers/admin-user.controller.js';
 import { AdminAuditController } from './controllers/admin-audit.controller.js';
 import { AdminDashboardController } from './controllers/admin-dashboard.controller.js';
 import { AdminDashboardService } from './admin-dashboard.service.js';
+import { AdminLeagueService } from './admin-league.service.js';
 import { UserModule } from '../user/user.module.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { AuthzModule } from '../../common/authz/authz.module.js';
@@ -35,6 +36,6 @@ import { PrismaModule } from '../prisma/prisma.module.js';
     AdminAuditController,
     AdminDashboardController,
   ],
-  providers: [AdminDashboardService],
+  providers: [AdminDashboardService, AdminLeagueService],
 })
 export class AdminModule {}

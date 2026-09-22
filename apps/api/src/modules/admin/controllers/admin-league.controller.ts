@@ -1,9 +1,9 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Delete, UseGuards, HttpCode, Req } from '@nestjs/common';
 import { RequirePermission } from '../../../common/authz/authz.decorators.js';
 import { PermissionsGuard } from '../../../common/authz/authz.guards.js';
 import { PermissionName } from '../../../common/authz/authz.types.js';
-import { CurrentUser } from '../../../common/authz/authz.decorators.js';
-import { AuthUser } from '../../../common/authz/authz.types.js';
+import { AdminLeagueService } from '../admin-league.service.js';
+import { AssignLeagueOperatorDto, CreateLeagueDto, UpdateLeagueDto } from '../dto/league.dto.js';
 
 /**
  * Admin League Controller
@@ -19,6 +19,7 @@ import { AuthUser } from '../../../common/authz/authz.types.js';
 @Controller('admin/leagues')
 @UseGuards(PermissionsGuard)
 export class AdminLeagueController {
+  constructor(private readonly leagueService: AdminLeagueService) {}
   /**
    * LIST LEAGUES
    * GET /admin/leagues
@@ -29,12 +30,8 @@ export class AdminLeagueController {
   @Get()
   @RequirePermission(PermissionName.VIEW_ADMIN_DASHBOARD)
   @HttpCode(200)
-  async listLeagues(@CurrentUser() user: AuthUser) {
-    return {
-      message: 'League listing is not yet implemented',
-      note: 'ADM-003 will implement the League domain',
-      user: user.id,
-    };
+  async listLeagues() {
+    return this.leagueService.listLeagues();
   }
 
   /**
@@ -47,13 +44,8 @@ export class AdminLeagueController {
   @Get(':leagueId')
   @RequirePermission(PermissionName.VIEW_ADMIN_DASHBOARD)
   @HttpCode(200)
-  async getLeague(@Param('leagueId') leagueId: string, @CurrentUser() user: AuthUser) {
-    return {
-      message: 'League retrieval is not yet implemented',
-      note: 'ADM-003 will implement the League domain',
-      leagueId,
-      user: user.id,
-    };
+  async getLeague(@Param('leagueId') leagueId: string) {
+    return this.leagueService.getLeague(leagueId);
   }
 
   /**
@@ -66,13 +58,8 @@ export class AdminLeagueController {
   @Post()
   @RequirePermission(PermissionName.MANAGE_SEASONS)
   @HttpCode(201)
-  async createLeague(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthUser) {
-    return {
-      message: 'League creation is not yet implemented',
-      note: 'ADM-003 will implement the League domain',
-      body,
-      user: user.id,
-    };
+  async createLeague(@Body() dto: CreateLeagueDto, @Req() req: any) {
+    return this.leagueService.createLeague(dto, this.actor(req));
   }
 
   /**
@@ -87,16 +74,10 @@ export class AdminLeagueController {
   @HttpCode(200)
   async updateLeague(
     @Param('leagueId') leagueId: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateLeagueDto,
+    @Req() req: any,
   ) {
-    return {
-      message: 'League update is not yet implemented',
-      note: 'ADM-003 will implement the League domain',
-      leagueId,
-      body,
-      user: user.id,
-    };
+    return this.leagueService.updateLeague(leagueId, dto, this.actor(req));
   }
 
   /**
@@ -111,15 +92,25 @@ export class AdminLeagueController {
   @HttpCode(201)
   async assignOperator(
     @Param('leagueId') leagueId: string,
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthUser,
+    @Body() dto: AssignLeagueOperatorDto,
+    @Req() req: any,
   ) {
-    return {
-      message: 'Operator assignment is not yet implemented',
-      note: 'ADM-003 will implement the League domain',
-      leagueId,
-      body,
-      user: user.id,
-    };
+    return this.leagueService.assignOperator(leagueId, dto, this.actor(req));
+  }
+
+  @Delete(':leagueId')
+  @RequirePermission(PermissionName.MANAGE_SEASONS)
+  async archiveLeague(@Param('leagueId') leagueId: string, @Req() req: any) {
+    return this.leagueService.deleteLeague(leagueId, this.actor(req));
+  }
+
+  @Delete(':leagueId/operators/:userId')
+  @RequirePermission(PermissionName.MANAGE_SEASONS)
+  async removeOperator(@Param('leagueId') leagueId: string, @Param('userId') userId: string, @Req() req: any) {
+    return this.leagueService.removeOperator(leagueId, userId, this.actor(req));
+  }
+
+  private actor(req: any) {
+    return { id: req.user?.id, role: req.user?.roles?.[0], correlationId: req.id };
   }
 }

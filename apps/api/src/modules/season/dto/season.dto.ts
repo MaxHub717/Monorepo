@@ -1,6 +1,9 @@
-import { IsBoolean, IsDateString, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreateSeasonDto {
+  @IsUUID('4')
+  leagueId!: string;
+
   @IsString()
   @IsNotEmpty()
   name!: string;

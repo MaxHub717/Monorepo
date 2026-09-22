@@ -68,6 +68,12 @@ enum SeasonStatus {
   ARCHIVED
 }
 
+enum LeagueStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
 enum DivisionType {
   AMATEUR
   COMPETITIVE
@@ -190,6 +196,7 @@ model User {
 
   player_profile     PlayerProfile?
   operator_profile   OperatorProfile?
+  league_operators   LeagueOperator[]
   user_roles         UserRole[]
   sessions           Session[]
   verification_tokens VerificationToken[]
@@ -251,6 +258,41 @@ model OperatorProfile {
   user                 User      @relation(fields: [user_id], references: [id])
 
   @@map("operator_profiles")
+}
+
+model League {
+  id                 String       @id @default(uuid()) @db.Uuid
+  name               String
+  description        String?
+  status             LeagueStatus @default(ACTIVE)
+  region             String?
+  metadata_json      Json?
+  created_at         DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime     @updatedAt @db.Timestamptz(6)
+  deleted_at         DateTime?    @db.Timestamptz(6)
+
+  seasons            Season[]
+  operators          LeagueOperator[]
+
+  @@unique([name])
+  @@index([status])
+  @@map("leagues")
+}
+
+model LeagueOperator {
+  id                   String   @id @default(uuid()) @db.Uuid
+  league_id            String   @db.Uuid
+  user_id              String   @db.Uuid
+  region               String?
+  assigned_division_id String?  @db.Uuid
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+
+  league               League   @relation(fields: [league_id], references: [id])
+  user                 User     @relation(fields: [user_id], references: [id])
+
+  @@unique([league_id, user_id])
+  @@index([user_id])
+  @@map("league_operators")
 }
 
 model Permission {
@@ -446,7 +488,8 @@ model ClubMember {
 
 model Season {
   id                   String       @id @default(uuid()) @db.Uuid
-  name                 String       @unique
+  league_id            String       @db.Uuid
+  name                 String
   description          String?
   status               SeasonStatus @default(DRAFT)
   start_date           DateTime?
@@ -457,6 +500,7 @@ model Season {
   updated_at            DateTime     @updatedAt @db.Timestamptz(6)
   deleted_at            DateTime?    @db.Timestamptz(6)
 
+  league              League       @relation(fields: [league_id], references: [id])
   divisions           Division[]
   match_weeks         MatchWeek[]
   matches             Match[]
@@ -465,6 +509,8 @@ model Season {
   club_applications   ClubApplication[]
   rewards             Reward[]
 
+  @@unique([league_id, name])
+  @@index([league_id, status])
   @@map("seasons")
 }
 

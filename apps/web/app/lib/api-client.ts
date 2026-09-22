@@ -342,6 +342,7 @@ export async function listClubs(): Promise<ClubSummary[]> {
 
 export type SeasonSummary = {
   id: string;
+  league_id?: string;
   name: string;
   status: string;
   start_date?: string;
@@ -356,6 +357,10 @@ export type SeasonSummary = {
     active: boolean;
   }>;
 };
+
+export async function createSeason(payload: { leagueId: string; name: string; startDate: string; endDate: string }): Promise<SeasonSummary> {
+  return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
+}
 
 export async function listSeasons(): Promise<SeasonSummary[]> {
   return apiFetch<SeasonSummary[]>(
@@ -539,4 +544,47 @@ export async function revokeUserRole(
       method: 'DELETE',
     },
   );
+}
+
+export type LeagueSummary = {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  region?: string | null;
+  _count?: { seasons: number; operators: number };
+  seasons?: Array<{ id: string; name: string; status: string; start_date?: string | null; end_date?: string | null }>;
+};
+
+export type LeagueDetails = LeagueSummary & {
+  operators: Array<{ id: string; user_id: string; region?: string | null; user: { id: string; email: string; username: string } }>;
+  seasons: Array<SeasonSummary & { _count?: { divisions: number; participants: number; matches: number } }>;
+};
+
+export async function listLeagues(): Promise<LeagueSummary[]> {
+  return apiFetch<LeagueSummary[]>('/admin/leagues', { cache: 'no-store' });
+}
+
+export async function getLeague(leagueId: string): Promise<LeagueDetails> {
+  return apiFetch<LeagueDetails>(`/admin/leagues/${leagueId}`, { cache: 'no-store' });
+}
+
+export async function createLeague(payload: { name: string; description?: string; region?: string }): Promise<LeagueSummary> {
+  return apiFetch<LeagueSummary>('/admin/leagues', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function updateLeague(leagueId: string, payload: { name?: string; description?: string | null; region?: string | null; status?: string }): Promise<LeagueSummary> {
+  return apiFetch<LeagueSummary>(`/admin/leagues/${leagueId}`, { method: 'PUT', body: JSON.stringify(payload) });
+}
+
+export async function archiveLeague(leagueId: string): Promise<LeagueSummary> {
+  return apiFetch<LeagueSummary>(`/admin/leagues/${leagueId}`, { method: 'DELETE' });
+}
+
+export async function assignLeagueOperator(leagueId: string, userId: string, region?: string): Promise<unknown> {
+  return apiFetch<unknown>(`/admin/leagues/${leagueId}/operators`, { method: 'POST', body: JSON.stringify({ userId, region }) });
+}
+
+export async function removeLeagueOperator(leagueId: string, userId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/admin/leagues/${leagueId}/operators/${userId}`, { method: 'DELETE' });
 }

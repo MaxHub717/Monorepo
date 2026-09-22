@@ -35,6 +35,7 @@ export class SeasonService {
   async listSeasons() {
     return this.prisma.season.findMany({
       include: {
+        league: { select: { id: true, name: true, status: true } },
         divisions: {
           include: {
             participants: {
@@ -61,8 +62,16 @@ export class SeasonService {
     }
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const league = await tx.league.findFirst({
+        where: { id: dto.leagueId, status: 'ACTIVE', deleted_at: null },
+        select: { id: true },
+      });
+      if (!league) throw new NotFoundException('Active league not found');
+
       const season = await tx.season.create({
+        // A season is always created inside an active permanent league.
         data: {
+          league_id: dto.leagueId,
           name: dto.name.trim(),
           status: 'DRAFT',
           start_date: startDate,
