@@ -67,12 +67,15 @@ export class SeasonService {
     });
     if (!season) throw new NotFoundException('Season not found');
 
-    const [fixtureCount, pendingResultCount, disputeCount, penaltyCount] = await Promise.all([
+    const [fixtureCount, pendingResultCount, disputeCount, penaltyCount, confirmedMatchCount] = await Promise.all([
       this.prisma.fixture.count({ where: { division: { season_id: seasonId } } }),
       this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['SUBMISSION_PENDING', 'UNDER_REVIEW'] } } }),
       this.prisma.dispute.count({ where: { match: { season_id: seasonId }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } } }),
       this.prisma.penalty.count({ where: { match: { season_id: seasonId }, status: { in: ['PROPOSED', 'UNDER_REVIEW', 'APPROVED'] } } }),
+      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['CONFIRMED', 'ARCHIVED'] } } }),
     ]);
+
+    const readiness = await this.getTransitionReadiness(seasonId, season.status, fixtureCount, confirmedMatchCount);
 
     const nextAction = {
       DRAFT: { label: 'Open registration', endpoint: 'publish', reason: 'Complete configuration before accepting participants.' },
@@ -103,10 +106,46 @@ export class SeasonService {
         pendingResults: pendingResultCount,
         disputes: disputeCount,
         penalties: penaltyCount,
+        confirmedMatches: confirmedMatchCount,
       },
       divisions: season.divisions,
       nextAction,
+      readiness,
     };
+  }
+
+  private async getTransitionReadiness(seasonId: string, status: string, fixtureCount: number, confirmedMatchCount: number) {
+    const divisions = await this.prisma.division.findMany({
+      where: { season_id: seasonId, active: true },
+      select: { id: true, name: true, format: true, _count: { select: { participants: true, fixtures: true } } },
+    });
+    const issues: string[] = [];
+    if (['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED'].includes(status) && !divisions.length) {
+      issues.push('At least one active division is required.');
+    }
+    if (status === 'DRAFT' && !(await this.hasValidSeasonDates(seasonId))) {
+      issues.push('Season start and end dates are required before registration opens.');
+    }
+    if (status === 'REGISTRATION_CLOSED') {
+      for (const division of divisions) {
+        if (division._count.participants < 2) issues.push(`${division.name} needs at least two active participants.`);
+      }
+    }
+    if (status === 'ROSTER_LOCKED') {
+      for (const division of divisions) {
+        const expected = division._count.participants * (division._count.participants - 1) / 2 * (division.format === 'ROUND_ROBIN_DOUBLE' ? 2 : 1);
+        if (division._count.fixtures !== expected) issues.push(`${division.name} needs ${expected} generated fixtures before activation.`);
+      }
+    }
+    if (status === 'ACTIVE' && (confirmedMatchCount < fixtureCount || fixtureCount === 0)) {
+      issues.push('All regular-season matches must be confirmed before playoffs can begin.');
+    }
+    return { canAdvance: issues.length === 0, issues };
+  }
+
+  private async hasValidSeasonDates(seasonId: string) {
+    const season = await this.prisma.season.findUnique({ where: { id: seasonId }, select: { start_date: true, end_date: true } });
+    return Boolean(season?.start_date && season.end_date && season.end_date > season.start_date);
   }
 
   async createSeason(
@@ -230,6 +269,19 @@ export class SeasonService {
           throw new BadRequestException(`Division ${division.name} must have a complete generated fixture schedule before activation`);
         }
       }
+    }
+
+    if (newStatus === 'PLAYOFFS') {
+      const pending = await tx.match.count({ where: { season_id: seasonId, status: { notIn: ['CONFIRMED', 'ARCHIVED', 'VOID', 'FORFEITED'] } } });
+      if (pending > 0) throw new BadRequestException('All regular-season matches must be resolved before playoffs can begin');
+      const standingsCount = await tx.standingsRow.count({ where: { season_id: seasonId } });
+      if (standingsCount < 4) throw new BadRequestException('At least four standings rows are required before playoffs can begin');
+    }
+
+    if (newStatus === 'COMPLETED') {
+      if (season.status !== 'PLAYOFFS') throw new BadRequestException('Season must be in playoffs before it can be completed');
+      const unresolved = await tx.dispute.count({ where: { match: { season_id: seasonId }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } } });
+      if (unresolved > 0) throw new BadRequestException('All disputes must be resolved before completing the season');
     }
 
     const updateData: Prisma.SeasonUpdateInput = { status: newStatus as Prisma.SeasonUpdateInput['status'] };

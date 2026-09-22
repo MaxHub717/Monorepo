@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import PageShell from '../../components/page-shell';
-import { archiveSeason, closeSeasonRegistration, completeSeason, getSeasonOverview, lockSeasonRoster, publishSeason, SeasonOverview, startSeasonPlayoffs, activateSeason } from '../../lib/api-client';
+import { archiveSeason, closeSeasonRegistration, completeSeason, generateDivisionFixtures, getSeasonOverview, lockSeasonRoster, publishSeason, SeasonOverview, startSeasonPlayoffs, activateSeason } from '../../lib/api-client';
 import styles from './season-workspace.module.css';
 
 type Props = { initialOverview: SeasonOverview };
@@ -50,6 +50,22 @@ export default function SeasonWorkspace({ initialOverview }: Props) {
     }
   }
 
+  async function generateFixtures() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      for (const division of overview.divisions.filter((item) => item.active)) {
+        await generateDivisionFixtures(overview.id, division.id);
+      }
+      await refresh();
+      setMessage('Fixture schedules generated.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to generate fixtures');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <PageShell title={overview.name} subtitle="Season management workspace.">
       <div className={styles.page}>
@@ -63,9 +79,10 @@ export default function SeasonWorkspace({ initialOverview }: Props) {
         </section>
 
         <section className={styles.actionPanel}>
-          <div><p className={styles.eyebrow}>Primary next action</p><h3>{overview.nextAction?.label ?? 'Season archived'}</h3><p>{overview.nextAction?.reason ?? 'This season is historical and no normal lifecycle actions remain.'}</p></div>
-          {overview.nextAction && <button className={styles.primaryButton} disabled={busy} onClick={transition}>{busy ? 'Updating...' : overview.nextAction.label}</button>}
+          <div><p className={styles.eyebrow}>Primary next action</p><h3>{overview.nextAction?.label ?? 'Season archived'}</h3><p>{overview.nextAction?.reason ?? 'This season is historical and no normal lifecycle actions remain.'}</p>{overview.readiness.issues.length > 0 && <ul className={styles.issues}>{overview.readiness.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}</div>
+          {overview.nextAction && <button className={styles.primaryButton} disabled={busy || !overview.readiness.canAdvance} onClick={transition}>{busy ? 'Updating...' : overview.nextAction.label}</button>}
         </section>
+        {overview.status === 'ROSTER_LOCKED' && <section className={styles.fixturePanel}><div><p className={styles.eyebrow}>Schedule preparation</p><h3>Generate fixtures</h3><p>Generate the round-robin schedule for every active division before activation.</p></div><button className={styles.secondaryButton} disabled={busy || overview.readiness.canAdvance} onClick={generateFixtures}>{busy ? 'Generating...' : 'Generate fixtures'}</button></section>}
         {message && <p className={styles.message}>{message}</p>}
 
         <section className={styles.metricGrid} aria-label="Season summary">

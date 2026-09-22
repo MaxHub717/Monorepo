@@ -361,9 +361,10 @@ export type SeasonSummary = {
 };
 
 export type SeasonOverview = SeasonSummary & {
-  counts: { participants: number; divisions: number; fixtures: number; matches: number; pendingResults: number; disputes: number; penalties: number };
+  counts: { participants: number; divisions: number; fixtures: number; matches: number; pendingResults: number; disputes: number; penalties: number; confirmedMatches: number };
   divisions: Array<{ id: string; name: string; type: string; format: string; capacity: number | null; active: boolean; _count: { participants: number; fixtures: number; matches: number; standings_rows: number } }>;
   nextAction: { label: string; endpoint: string; reason: string } | null;
+  readiness: { canAdvance: boolean; issues: string[] };
 };
 
 export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number }): Promise<SeasonSummary> {
@@ -603,4 +604,8 @@ export async function getSeasonOverview(seasonId: string): Promise<SeasonOvervie
 
 export async function lockSeasonRoster(seasonId: string): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>(`/seasons/${seasonId}/lock-roster`, { method: 'POST' });
+}
+
+export async function generateDivisionFixtures(seasonId: string, divisionId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/fixtures/seasons/${seasonId}/divisions/${divisionId}/generate`, { method: 'POST' });
 }
