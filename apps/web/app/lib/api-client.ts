@@ -609,3 +609,36 @@ export async function lockSeasonRoster(seasonId: string): Promise<SeasonSummary>
 export async function generateDivisionFixtures(seasonId: string, divisionId: string): Promise<unknown> {
   return apiFetch<unknown>(`/fixtures/seasons/${seasonId}/divisions/${divisionId}/generate`, { method: 'POST' });
 }
+
+export type AdminParticipant = {
+  id: string;
+  season_id: string;
+  division_id: string;
+  player_id: string;
+  status: string;
+  seed?: number | null;
+  registered_at: string;
+  withdrawn_at?: string | null;
+  player: { id: string; gamer_tag: string; user?: { id: string; email: string; username: string } };
+  division: { id: string; name: string; type: string; format: string; capacity?: number | null; active: boolean };
+};
+
+export async function listAdminParticipants(seasonId: string): Promise<AdminParticipant[]> {
+  return apiFetch<AdminParticipant[]>(`/admin/seasons/${seasonId}/participants`, { cache: 'no-store' });
+}
+
+export async function adminRegisterParticipant(seasonId: string, payload: { playerId: string; divisionId: string; seed?: number; reason: string }): Promise<AdminParticipant> {
+  return apiFetch<AdminParticipant>(`/admin/seasons/${seasonId}/participants`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function bulkAdminRegisterParticipants(seasonId: string, payload: { participants: Array<{ playerId: string; divisionId: string; seed?: number; reason: string }> }): Promise<AdminParticipant[]> {
+  return apiFetch<AdminParticipant[]>(`/admin/seasons/${seasonId}/participants/bulk`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function updateAdminParticipant(seasonId: string, participantId: string, payload: { status?: string; divisionId?: string; seed?: number | null; reason: string }): Promise<AdminParticipant> {
+  return apiFetch<AdminParticipant>(`/admin/seasons/${seasonId}/participants/${participantId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
+export async function bulkAdminUpdateParticipants(seasonId: string, payload: { participants: Array<{ participantId: string; status?: string; divisionId?: string; seed?: number | null; reason: string }> }): Promise<AdminParticipant[]> {
+  return apiFetch<AdminParticipant[]>(`/admin/seasons/${seasonId}/participants/bulk`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
