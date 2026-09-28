@@ -94,7 +94,7 @@ export default function SeasonWorkspace({ initialOverview }: Props) {
           <div className={styles.panel}><p className={styles.eyebrow}>Configuration</p><h3>Divisions</h3>{overview.divisions.length ? <div className={styles.divisionList}>{overview.divisions.map((division) => <div className={styles.division} key={division.id}><div><strong>{division.name}</strong><span>{statusLabel(division.type)} · {statusLabel(division.format)}</span></div><span>{division._count.participants}/{division.capacity ?? '∞'} players</span></div>)}</div> : <p>No divisions configured.</p>}</div>
         </section>
 
-        <nav className={styles.workspaces} aria-label="Season workspaces"><Link href={`/participants?seasonId=${overview.id}`}>Participants</Link><Link href={`/fixtures?seasonId=${overview.id}`}>Fixtures</Link><Link href={`/results?seasonId=${overview.id}`}>Results</Link><Link href={`/standings?seasonId=${overview.id}`}>Standings</Link><Link href={`/disputes?seasonId=${overview.id}`}>Disputes</Link><Link href={`/penalties?seasonId=${overview.id}`}>Penalties</Link></nav>
+        <nav className={styles.workspaces} aria-label="Season workspaces"><Link href={`/seasons/${overview.id}/participants`}>Participants</Link><Link href={`/seasons/${overview.id}/roster-review`}>Roster review</Link><Link href={`/fixtures?seasonId=${overview.id}`}>Fixtures</Link><Link href={`/results?seasonId=${overview.id}`}>Results</Link><Link href={`/standings?seasonId=${overview.id}`}>Standings</Link><Link href={`/disputes?seasonId=${overview.id}`}>Disputes</Link><Link href={`/penalties?seasonId=${overview.id}`}>Penalties</Link></nav>
       </div>
     </PageShell>
   );
