@@ -148,6 +148,101 @@
   color: #647268;
 }
 
+.scheduleSection {
+  display: grid;
+  gap: 16px;
+}
+
+.scheduleSection > div:first-child h3,
+.scheduleCard h4 {
+  margin: 0;
+}
+
+.scheduleSection > div:first-child > p:last-child {
+  margin: 7px 0 0;
+  color: #647268;
+}
+
+.scheduleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+  gap: 12px;
+}
+
+.scheduleCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #d7e3db;
+  border-radius: 6px;
+  background: #f7f9f7;
+}
+
+.scheduleCard header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scheduleCard header div {
+  display: grid;
+  gap: 5px;
+}
+
+.scheduleCard header span,
+.scheduleStats dt {
+  color: #647268;
+  font-size: 0.76rem;
+}
+
+.scheduleStatus {
+  color: #17633d;
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.scheduleStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.scheduleStats div {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #dce6df;
+}
+
+.scheduleStats dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.scheduleBlockers,
+.scheduleWarnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+}
+
+.scheduleBlockers {
+  color: #9a4b27;
+}
+
+.scheduleWarnings {
+  color: #647268;
+}
+
+.scheduleCard .secondaryButton {
+  align-self: flex-start;
+}
+
 .secondaryButton {
   flex: 0 0 auto;
   border: 1px solid #17633d;

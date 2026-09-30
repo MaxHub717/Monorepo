@@ -1,0 +1,135 @@
+ADM-001 through ADM-010 summary
+
+This admin foundation is now implemented across the full lifecycle from platform governance through season execution.
+
+### ADM-001 — Admin foundation and access model
+- Added the admin permission and guard structure, including authenticated admin checks and RBAC-compatible access flows.
+- Established the base admin routing pattern used across the system.
+- Core files:
+  - `page.tsx`
+  - `auth-guard.ts`
+  - `api-server-client.ts`
+
+### ADM-002 — Admin dashboard
+- Built the operational dashboard for platform overview and action routing.
+- Included metrics, active season summaries, alerts, recent activity, and navigation shortcuts.
+- Core file:
+  - `page.tsx`
+
+### ADM-003 — League management
+- Added full League admin functionality:
+  - create league
+  - update league
+  - archive league
+  - assign/remove operators
+  - active/inactive state handling
+  - league-specific workspace with seasons and operator context
+- Core files:
+  - `admin-league.controller.ts`
+  - [apps/web/app/admin/leagues/[leagueId]/league-workspace.tsx](apps/web/app/admin/leagues/[leagueId]/league-workspace.tsx)
+
+### ADM-004 — Create season workflow
+- Added admin-driven season creation with:
+  - league selection
+  - season name/description
+  - date window
+  - initial division config
+  - validation and DRAFT status on creation
+- Core files:
+  - `page.tsx`
+  - `create-season-content.tsx`
+  - `season.dto.ts`
+  - `season.service.ts`
+
+### ADM-005 — Season management workspace
+- Replaced the simple season list with a real workspace page showing:
+  - season status
+  - summary metrics
+  - division list
+  - league context
+  - lifecycle progression
+  - operational navigation
+- Core files:
+  - [apps/web/app/seasons/[seasonId]/page.tsx](apps/web/app/seasons/[seasonId]/page.tsx)
+  - [apps/web/app/seasons/[seasonId]/season-workspace.tsx](apps/web/app/seasons/[seasonId]/season-workspace.tsx)
+  - `season.controller.ts`
+  - `season.service.ts`
+
+### ADM-006 — Season lifecycle controls
+- Added proper lifecycle state management and transition enforcement:
+  - DRAFT → REGISTRATION_OPEN
+  - REGISTRATION_OPEN → REGISTRATION_CLOSED
+  - REGISTRATION_CLOSED → ROSTER_LOCKED
+  - ROSTER_LOCKED → ACTIVE
+  - ACTIVE → PLAYOFFS
+  - PLAYOFFS → COMPLETED
+  - COMPLETED → ARCHIVED
+- Added readiness gating and blocker messaging so invalid actions are disabled.
+- Added fixture generation trigger while roster-locked.
+- Core files:
+  - [apps/web/app/seasons/[seasonId]/season-workspace.tsx](apps/web/app/seasons/[seasonId]/season-workspace.tsx)
+  - `season.service.ts`
+
+### ADM-007 — Division configuration
+- Added division setup and editing support for:
+  - name
+  - type
+  - competition format
+  - capacity
+  - active/inactive state
+- Enforced lifecycle constraints so divisions are not casually changed after registration closes.
+- Core files:
+  - `season.dto.ts`
+  - `season.service.ts`
+
+### ADM-008 — Hardened admin participant API
+- Added secure admin participant endpoints and hardened the service layer with:
+  - admin-only season-scoped listing
+  - admin registration
+  - bulk registration
+  - bulk status updates
+  - reason capture
+  - audit and outbox emission
+  - lifecycle protections
+  - division capacity checks
+- Core files:
+  - `admin-participation.controller.ts`
+  - `admin-participation.service.ts`
+  - `admin-participation.dto.ts`
+
+### ADM-009 — Admin registration and participant management UI
+- Added a complete participant management screen for a season:
+  - add participant
+  - bulk register
+  - update status
+  - withdraw/disqualify/reactivate
+  - roster listing and status summary
+- Core files:
+  - [apps/web/app/seasons/[seasonId]/participants/page.tsx](apps/web/app/seasons/[seasonId]/participants/page.tsx)
+  - [apps/web/app/seasons/[seasonId]/participants/participant-management.tsx](apps/web/app/seasons/[seasonId]/participants/participant-management.tsx)
+
+### ADM-010 — Roster review and lock workflow
+- Added the final roster review stage before season activation:
+  - active participant count
+  - division readiness
+  - lock prerequisite checks
+  - lock action
+  - admin participant corrections during review
+- Core files:
+  - [apps/web/app/seasons/[seasonId]/roster-review/page.tsx](apps/web/app/seasons/[seasonId]/roster-review/page.tsx)
+  - [apps/web/app/seasons/[seasonId]/roster-review/roster-review.tsx](apps/web/app/seasons/[seasonId]/roster-review/roster-review.tsx)
+
+---
+
+## Overall outcome
+The admin system now supports a complete operational loop:
+
+- create/manage leagues
+- create and configure seasons
+- manage divisions
+- accept and review participants
+- lock the roster
+- generate fixtures
+- advance the season lifecycle
+
+This gives the project a working admin operational foundation for competition management instead of only static dashboard scaffolding.

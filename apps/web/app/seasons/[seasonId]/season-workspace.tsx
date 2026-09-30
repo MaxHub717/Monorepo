@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import PageShell from '../../components/page-shell';
-import { archiveSeason, closeSeasonRegistration, completeSeason, generateDivisionFixtures, getSeasonOverview, lockSeasonRoster, publishSeason, SeasonOverview, startSeasonPlayoffs, activateSeason } from '../../lib/api-client';
+import { archiveSeason, closeSeasonRegistration, completeSeason, generateDivisionFixtures, getSeasonFixtureSchedule, getSeasonOverview, lockSeasonRoster, publishSeason, SeasonFixtureSchedule, SeasonOverview, startSeasonPlayoffs, activateSeason } from '../../lib/api-client';
 import styles from './season-workspace.module.css';
 
-type Props = { initialOverview: SeasonOverview };
+type Props = { initialOverview: SeasonOverview; initialSchedule: SeasonFixtureSchedule };
 
 const statusOrder = ['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED', 'ACTIVE', 'PLAYOFFS', 'COMPLETED', 'ARCHIVED'];
 
@@ -18,13 +18,19 @@ function statusLabel(value: string) {
   return value.replaceAll('_', ' ');
 }
 
-export default function SeasonWorkspace({ initialOverview }: Props) {
+export default function SeasonWorkspace({ initialOverview, initialSchedule }: Props) {
   const [overview, setOverview] = useState(initialOverview);
+  const [schedule, setSchedule] = useState(initialSchedule);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function refresh() {
-    setOverview(await getSeasonOverview(overview.id));
+    const [nextOverview, nextSchedule] = await Promise.all([
+      getSeasonOverview(overview.id),
+      getSeasonFixtureSchedule(overview.id),
+    ]);
+    setOverview(nextOverview);
+    setSchedule(nextSchedule);
   }
 
   async function transition() {
@@ -50,15 +56,13 @@ export default function SeasonWorkspace({ initialOverview }: Props) {
     }
   }
 
-  async function generateFixtures() {
+  async function generateFixtures(divisionId: string) {
     setBusy(true);
     setMessage(null);
     try {
-      for (const division of overview.divisions.filter((item) => item.active)) {
-        await generateDivisionFixtures(overview.id, division.id);
-      }
+      await generateDivisionFixtures(overview.id, divisionId);
       await refresh();
-      setMessage('Fixture schedules generated.');
+      setMessage('Fixture schedule generated.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to generate fixtures');
     } finally {
@@ -82,7 +86,26 @@ export default function SeasonWorkspace({ initialOverview }: Props) {
           <div><p className={styles.eyebrow}>Primary next action</p><h3>{overview.nextAction?.label ?? 'Season archived'}</h3><p>{overview.nextAction?.reason ?? 'This season is historical and no normal lifecycle actions remain.'}</p>{overview.readiness.issues.length > 0 && <ul className={styles.issues}>{overview.readiness.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}</div>
           {overview.nextAction && <button className={styles.primaryButton} disabled={busy || !overview.readiness.canAdvance} onClick={transition}>{busy ? 'Updating...' : overview.nextAction.label}</button>}
         </section>
-        {overview.status === 'ROSTER_LOCKED' && <section className={styles.fixturePanel}><div><p className={styles.eyebrow}>Schedule preparation</p><h3>Generate fixtures</h3><p>Generate the round-robin schedule for every active division before activation.</p></div><button className={styles.secondaryButton} disabled={busy || overview.readiness.canAdvance} onClick={generateFixtures}>{busy ? 'Generating...' : 'Generate fixtures'}</button></section>}
+        <section className={styles.scheduleSection}>
+          <div><p className={styles.eyebrow}>Schedule preparation</p><h3>Division fixture generation</h3><p>Fixtures are generated from the active participants in the locked roster.</p></div>
+          {schedule.divisions.length ? <div className={styles.scheduleGrid}>{schedule.divisions.map((division) => {
+            const canGenerate = overview.status === 'ROSTER_LOCKED' && division.active && division.generationStatus === 'NOT_GENERATED';
+            return <article className={styles.scheduleCard} key={division.divisionId}>
+              <header><div><h4>{division.divisionName}</h4><span>{statusLabel(division.format)}</span></div><strong className={styles.scheduleStatus}>{statusLabel(division.generationStatus)}</strong></header>
+              <dl className={styles.scheduleStats}>
+                <div><dt>Participants</dt><dd>{division.participantCount}</dd></div>
+                <div><dt>Expected fixtures</dt><dd>{division.expectedFixtureCount}</dd></div>
+                <div><dt>Current fixtures</dt><dd>{division.currentFixtureCount}</dd></div>
+                <div><dt>Rounds</dt><dd>{division.roundCount}</dd></div>
+              </dl>
+              {division.blockers.length > 0 && <ul className={styles.scheduleBlockers}>{division.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+              {division.warnings.length > 0 && <ul className={styles.scheduleWarnings}>{division.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+              <button className={styles.secondaryButton} disabled={busy || !canGenerate} onClick={() => generateFixtures(division.divisionId)}>
+                {busy ? 'Generating...' : division.generationStatus === 'GENERATED' ? 'Generated' : 'Generate fixtures'}
+              </button>
+            </article>;
+          })}</div> : <p>No divisions are configured for this season.</p>}
+        </section>
         {message && <p className={styles.message}>{message}</p>}
 
         <section className={styles.metricGrid} aria-label="Season summary">

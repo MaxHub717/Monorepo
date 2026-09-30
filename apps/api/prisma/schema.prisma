@@ -581,6 +581,7 @@ model Fixture {
   id             String      @id @default(uuid()) @db.Uuid
   division_id    String      @db.Uuid
   match_week_id  String?     @db.Uuid
+  fixture_number Int?
   home_player_id String      @db.Uuid
   away_player_id String      @db.Uuid
   scheduled_at   DateTime?
@@ -596,6 +597,7 @@ model Fixture {
   match       Match?
 
   @@index([division_id, scheduled_at])
+  @@unique([division_id, fixture_number])
   @@unique([division_id, schedule_key])
   @@map("fixtures")
 }

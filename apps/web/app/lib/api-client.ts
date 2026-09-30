@@ -367,6 +367,26 @@ export type SeasonOverview = SeasonSummary & {
   readiness: { canAdvance: boolean; issues: string[] };
 };
 
+export type DivisionFixtureSchedule = {
+  divisionId: string;
+  divisionName: string;
+  active: boolean;
+  format: string;
+  participantCount: number;
+  expectedFixtureCount: number;
+  currentFixtureCount: number;
+  roundCount: number;
+  generationStatus: 'BLOCKED' | 'NOT_GENERATED' | 'GENERATED' | 'INCOMPLETE';
+  blockers: string[];
+  warnings: string[];
+};
+
+export type SeasonFixtureSchedule = {
+  seasonId: string;
+  seasonStatus: string;
+  divisions: DivisionFixtureSchedule[];
+};
+
 export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
@@ -608,6 +628,10 @@ export async function lockSeasonRoster(seasonId: string): Promise<SeasonSummary>
 
 export async function generateDivisionFixtures(seasonId: string, divisionId: string): Promise<unknown> {
   return apiFetch<unknown>(`/fixtures/seasons/${seasonId}/divisions/${divisionId}/generate`, { method: 'POST' });
+}
+
+export async function getSeasonFixtureSchedule(seasonId: string): Promise<SeasonFixtureSchedule> {
+  return apiFetch<SeasonFixtureSchedule>(`/fixtures/seasons/${seasonId}`, { cache: 'no-store' });
 }
 
 export type AdminParticipant = {
