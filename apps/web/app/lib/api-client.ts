@@ -372,11 +372,34 @@ export type DivisionFixtureSchedule = {
   divisionName: string;
   active: boolean;
   format: string;
+  registrationCapacity: number | null;
+  competitionCapacity: number | null;
+  configuredCompetitionParticipantCount: number | null;
+  schedulingPeriodDays: number;
+  matchesPerParticipant: number;
+  schedulingPeriodCount: number;
+  matchWindowStartMinutes: number | null;
+  matchWindowEndMinutes: number | null;
+  matchWindowTimezone: string;
+  concurrentMatches: number;
+  registrationCount: number;
   participantCount: number;
   expectedFixtureCount: number;
   currentFixtureCount: number;
   roundCount: number;
   generationStatus: 'BLOCKED' | 'NOT_GENERATED' | 'GENERATED' | 'INCOMPLETE';
+  validation: {
+    valid: boolean;
+    totalFixtures: number;
+    fixturesPerParticipant: Array<{ participantId: string; fixtureCount: number }>;
+    fixturesPerSchedulingPeriod: Array<{ periodNumber: number; fixtureCount: number }>;
+    maximumFixturesPerParticipantPerPeriod: number;
+    requiredConcurrentMatches: number;
+    configuredConcurrentMatches: number;
+    schedulingPeriodsRequired: number;
+    errors: string[];
+    densityWarnings: string[];
+  } | null;
   blockers: string[];
   warnings: string[];
 };
@@ -387,7 +410,7 @@ export type SeasonFixtureSchedule = {
   divisions: DivisionFixtureSchedule[];
 };
 
-export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number }): Promise<SeasonSummary> {
+export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
 
@@ -471,7 +494,16 @@ export async function createDivision(
   payload: {
     name: string;
     type?: string;
+    format?: string;
     capacity?: number;
+    registrationCapacity?: number;
+    competitionParticipantCount?: number;
+    schedulingPeriodDays?: number;
+    matchesPerParticipant?: number;
+    matchWindowStartMinutes?: number;
+    matchWindowEndMinutes?: number;
+    matchWindowTimezone?: string;
+    concurrentMatches?: number;
     active?: boolean;
   },
 ) {
@@ -489,7 +521,16 @@ export async function updateDivision(
   payload: {
     name?: string;
     type?: string;
+    format?: string;
     capacity?: number;
+    registrationCapacity?: number | null;
+    competitionParticipantCount?: number | null;
+    schedulingPeriodDays?: number;
+    matchesPerParticipant?: number;
+    matchWindowStartMinutes?: number | null;
+    matchWindowEndMinutes?: number | null;
+    matchWindowTimezone?: string;
+    concurrentMatches?: number;
     active?: boolean;
   },
 ) {

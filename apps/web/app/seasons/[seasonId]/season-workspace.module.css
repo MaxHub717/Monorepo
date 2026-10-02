@@ -361,6 +361,7 @@
 
 .division {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -376,6 +377,30 @@
 
 .division div span {
   font-size: 0.76rem;
+}
+
+.divisionFormat {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  min-width: min(180px, 100%);
+  color: #647268;
+  font-size: 0.72rem;
+}
+
+.divisionFormat select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #c9d8ce;
+  border-radius: 4px;
+  padding: 0 9px;
+  background: #fff;
+  color: #17211b;
+}
+
+.divisionFormat select:disabled {
+  background: #f1f4f1;
+  color: #647268;
 }
 
 .workspaces {
