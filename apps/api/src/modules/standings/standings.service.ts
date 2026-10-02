@@ -105,6 +105,7 @@ export class StandingsService {
       where: {
         season_id: seasonId,
         status: 'ACTIVE',
+        competition_selected: true,
         ...(divisionId ? { division_id: divisionId } : {}),
       },
       select: { player_id: true, division_id: true },

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
+import { isEligiblePlayerProfile } from './eligibility.js';
 
 export interface RegisterParticipantInput {
   playerId: string;
@@ -63,7 +64,7 @@ export class ParticipationService {
       if (player.verification_status !== 'VERIFIED') {
         throw new BadRequestException('Player must be verified before entering a season');
       }
-      if (['SUSPENDED', 'BANNED', 'ARCHIVED', 'RETIRED'].includes(player.player_status)) {
+      if (!isEligiblePlayerProfile(player)) {
         throw new BadRequestException('Player is not eligible to participate');
       }
 
@@ -97,12 +98,12 @@ export class ParticipationService {
         return participant;
       }
 
-      if (division.capacity !== null) {
-        const activeCount = await tx.divisionParticipant.count({
-          where: { division_id: divisionId, status: 'ACTIVE' },
+      if (division.registration_capacity !== null) {
+        const registrationCount = await tx.divisionParticipant.count({
+          where: { division_id: divisionId },
         });
-        if (activeCount >= division.capacity) {
-          throw new BadRequestException('Division has reached its participant capacity');
+        if (registrationCount >= division.registration_capacity) {
+          throw new BadRequestException('Division has reached its registration capacity');
         }
       }
 

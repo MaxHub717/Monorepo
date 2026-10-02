@@ -522,6 +522,14 @@ model Division {
   format      CompetitionFormat @default(ROUND_ROBIN_SINGLE)
   description String?
   capacity    Int?
+  registration_capacity Int?
+  competition_participant_count Int?
+  scheduling_period_days Int @default(7)
+  matches_per_participant Int @default(1) // Soft target per scheduling period, not a maximum.
+  match_window_start_minutes Int?
+  match_window_end_minutes Int?
+  match_window_timezone String @default("UTC")
+  concurrent_matches Int @default(1)
   active      Boolean      @default(true)
   created_at  DateTime     @default(now()) @db.Timestamptz(6)
   updated_at  DateTime     @updatedAt @db.Timestamptz(6)
@@ -543,6 +551,7 @@ model DivisionParticipant {
   division_id  String              @db.Uuid
   player_id    String              @db.Uuid
   status       ParticipationStatus @default(ACTIVE)
+  competition_selected Boolean      @default(true)
   seed         Int?
   registered_at DateTime           @default(now()) @db.Timestamptz(6)
   withdrawn_at DateTime?
@@ -582,6 +591,8 @@ model Fixture {
   division_id    String      @db.Uuid
   match_week_id  String?     @db.Uuid
   fixture_number Int?
+  scheduling_period_number Int?
+  concurrency_slot Int?
   home_player_id String      @db.Uuid
   away_player_id String      @db.Uuid
   scheduled_at   DateTime?

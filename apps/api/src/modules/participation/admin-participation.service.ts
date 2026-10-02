@@ -3,6 +3,7 @@ import { ParticipationStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service.js';
 import { OutboxService } from '../events/outbox.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { isEligiblePlayerProfile } from './eligibility.js';
 import { AdminBulkRegisterParticipantDto, AdminBulkUpdateParticipantDto, AdminRegisterParticipantDto, AdminUpdateParticipantDto } from './dto/admin-participation.dto.js';
 
 export interface AdminParticipationActor {
@@ -27,7 +28,7 @@ export class AdminParticipationService {
       where: { season_id: seasonId },
       include: {
         player: { include: { user: { select: { id: true, email: true, username: true } } } },
-        division: { select: { id: true, name: true, type: true, format: true, capacity: true, active: true } },
+        division: { select: { id: true, name: true, type: true, format: true, capacity: true, registration_capacity: true, competition_participant_count: true, active: true } },
       },
       orderBy: [{ status: 'asc' }, { division: { name: 'asc' } }, { seed: 'asc' }, { registered_at: 'asc' }],
     });
@@ -39,10 +40,11 @@ export class AdminParticipationService {
       if (season.status !== 'REGISTRATION_OPEN') throw new BadRequestException('Administrative registration is only available while registration is open');
       const player = await tx.playerProfile.findUnique({ where: { id: dto.playerId } });
       if (!player) throw new NotFoundException('Player not found');
+      if (!isEligiblePlayerProfile(player)) throw new BadRequestException('Player is not eligible to participate');
       const division = await this.requireDivision(tx, seasonId, dto.divisionId);
       const existing = await tx.divisionParticipant.findUnique({ where: { season_id_player_id: { season_id: seasonId, player_id: dto.playerId } } });
       if (existing?.status === 'ACTIVE') throw new BadRequestException('Player is already actively registered in this season');
-      await this.ensureCapacity(tx, division.id, existing?.division_id === division.id ? existing.id : undefined);
+      await this.ensureRegistrationCapacity(tx, division.id, existing?.division_id === division.id ? existing.id : undefined);
 
       const participant = existing
         ? await tx.divisionParticipant.update({ where: { id: existing.id }, data: { division_id: division.id, status: 'ACTIVE', seed: dto.seed ?? existing.seed, withdrawn_at: null }, include: { player: true, division: true } })
@@ -64,9 +66,10 @@ export class AdminParticipationService {
         const existing = await tx.divisionParticipant.findUnique({ where: { season_id_player_id: { season_id: seasonId, player_id: item.playerId } } });
         const player = await tx.playerProfile.findUnique({ where: { id: item.playerId } });
         if (!player) throw new NotFoundException(`Player ${item.playerId} not found`);
+        if (!isEligiblePlayerProfile(player)) throw new BadRequestException(`Player ${item.playerId} is not eligible to participate`);
         const division = await this.requireDivision(tx, seasonId, item.divisionId);
         if (existing?.status === 'ACTIVE') throw new BadRequestException(`Player ${item.playerId} is already actively registered in this season`);
-        await this.ensureCapacity(tx, division.id, existing?.division_id === division.id ? existing.id : undefined);
+        await this.ensureRegistrationCapacity(tx, division.id, existing?.division_id === division.id ? existing.id : undefined);
         const participant = existing
           ? await tx.divisionParticipant.update({ where: { id: existing.id }, data: { division_id: division.id, status: 'ACTIVE', seed: item.seed ?? existing.seed, withdrawn_at: null }, include: { player: true, division: true } })
           : await tx.divisionParticipant.create({ data: { season_id: seasonId, division_id: division.id, player_id: item.playerId, status: 'ACTIVE', seed: item.seed }, include: { player: true, division: true } });
@@ -86,7 +89,7 @@ export class AdminParticipationService {
       }
       const nextStatus = (dto.status as ParticipationStatus | undefined) ?? participant.status;
       const nextDivision = dto.divisionId ? await this.requireDivision(tx, seasonId, dto.divisionId) : participant.division;
-      if (nextStatus === 'ACTIVE') await this.ensureCapacity(tx, nextDivision.id, participant.division_id === nextDivision.id ? participant.id : undefined);
+      if (nextStatus === 'ACTIVE') await this.ensureRegistrationCapacity(tx, nextDivision.id, participant.division_id === nextDivision.id ? participant.id : undefined);
 
       const updated = await tx.divisionParticipant.update({
         where: { id: participant.id },
@@ -114,7 +117,7 @@ export class AdminParticipationService {
         }
         const nextStatus = (item.status as ParticipationStatus | undefined) ?? participant.status;
         const nextDivision = item.divisionId ? await this.requireDivision(tx, seasonId, item.divisionId) : participant.division;
-        if (nextStatus === 'ACTIVE') await this.ensureCapacity(tx, nextDivision.id, participant.division_id === nextDivision.id ? participant.id : undefined);
+        if (nextStatus === 'ACTIVE') await this.ensureRegistrationCapacity(tx, nextDivision.id, participant.division_id === nextDivision.id ? participant.id : undefined);
         const updated = await tx.divisionParticipant.update({
           where: { id: participant.id },
           data: {
@@ -144,11 +147,11 @@ export class AdminParticipationService {
     return division;
   }
 
-  private async ensureCapacity(tx: Prisma.TransactionClient, divisionId: string, participantId?: string) {
-    const division = await tx.division.findUnique({ where: { id: divisionId }, select: { capacity: true } });
-    if (division?.capacity === null || division?.capacity === undefined) return;
-    const count = await tx.divisionParticipant.count({ where: { division_id: divisionId, status: 'ACTIVE', ...(participantId ? { id: { not: participantId } } : {}) } });
-    if (count >= division.capacity) throw new BadRequestException('Division has reached its participant capacity');
+  private async ensureRegistrationCapacity(tx: Prisma.TransactionClient, divisionId: string, participantId?: string) {
+    const division = await tx.division.findUnique({ where: { id: divisionId }, select: { registration_capacity: true } });
+    if (division?.registration_capacity === null || division?.registration_capacity === undefined) return;
+    const count = await tx.divisionParticipant.count({ where: { division_id: divisionId, ...(participantId ? { id: { not: participantId } } : {}) } });
+    if (count >= division.registration_capacity) throw new BadRequestException('Division has reached its registration capacity');
   }
 
   private async record(tx: Prisma.TransactionClient, eventName: string, action: string, participantId: string, actor: AdminParticipationActor, reason: string, beforeState: unknown, afterState: unknown) {

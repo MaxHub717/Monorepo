@@ -18,7 +18,7 @@ export class AdminDashboardService {
         include: {
           divisions: {
             where: { active: true },
-            include: { participants: { where: { status: 'ACTIVE' }, select: { id: true } } },
+            select: { id: true },
           },
           _count: { select: { matches: true, participants: true } },
         },

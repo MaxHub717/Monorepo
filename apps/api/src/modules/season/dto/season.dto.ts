@@ -1,4 +1,6 @@
-import { IsBoolean, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+
+const competitionFormats = ['ROUND_ROBIN_SINGLE', 'ROUND_ROBIN_DOUBLE'];
 
 export class CreateSeasonDto {
   @IsUUID('4')
@@ -28,13 +30,55 @@ export class CreateSeasonDto {
   divisionType?: string;
 
   @IsOptional()
-  @IsIn(['ROUND_ROBIN_SINGLE', 'ROUND_ROBIN_DOUBLE'])
+  @IsIn(competitionFormats)
   divisionFormat?: string;
 
   @IsOptional()
   @IsInt()
   @Min(2)
   divisionCapacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  registrationCapacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  competitionParticipantCount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  schedulingPeriodDays?: number;
+
+  /** Soft target per scheduling period; the complete fixture set is always retained. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  matchesPerParticipant?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1439)
+  matchWindowStartMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  matchWindowEndMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  matchWindowTimezone?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  concurrentMatches?: number;
 }
 
 export class CreateDivisionDto {
@@ -47,13 +91,54 @@ export class CreateDivisionDto {
   type?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn(competitionFormats)
   format?: string;
 
   @IsOptional()
   @IsInt()
   @Min(2)
   capacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  registrationCapacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  competitionParticipantCount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  schedulingPeriodDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  matchesPerParticipant?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1439)
+  matchWindowStartMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  matchWindowEndMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  matchWindowTimezone?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  concurrentMatches?: number;
 
   @IsOptional()
   @IsBoolean()
@@ -71,13 +156,54 @@ export class UpdateDivisionDto {
   type?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn(competitionFormats)
   format?: string;
 
   @IsOptional()
   @IsInt()
   @Min(2)
   capacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  registrationCapacity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  competitionParticipantCount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  schedulingPeriodDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  matchesPerParticipant?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1439)
+  matchWindowStartMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  matchWindowEndMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  matchWindowTimezone?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  concurrentMatches?: number;
 
   @IsOptional()
   @IsBoolean()

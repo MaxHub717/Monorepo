@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FixtureService, buildRoundRobin, ensureMatchWeeks } from './fixture.service.js';
+import { FixtureService, buildRoundRobin, distributeFixtures, ensureMatchWeeks, validateGeneratedSchedule } from './fixture.service.js';
+import { MAX_FIXTURES_PER_GENERATION, resolveCompetitionParticipantCount } from '../season/competition-field.js';
 
 describe('ensureMatchWeeks', () => {
   it('reuses existing weeks and only creates missing week numbers', async () => {
@@ -86,6 +87,149 @@ describe('buildRoundRobin', () => {
       expect(pair[0].away).toBe(pair[1].home);
     }
   });
+
+  it('rejects unsupported competition formats instead of treating them as single round robin', () => {
+    expect(() => buildRoundRobin(['A', 'B', 'C'], 'SWISS' as any)).toThrow('Unsupported competition format');
+  });
+});
+
+describe('resolveCompetitionParticipantCount', () => {
+  it('bounds a large registration pool by the configured competition field', () => {
+    expect(resolveCompetitionParticipantCount({ capacity: 8, competition_participant_count: null }, 100)).toBe(8);
+    expect(resolveCompetitionParticipantCount({ capacity: 100, competition_participant_count: 16 }, 1000)).toBe(16);
+  });
+
+  it('uses every eligible participant when no competition bound is configured', () => {
+    expect(resolveCompetitionParticipantCount({ capacity: null, competition_participant_count: null }, 1000)).toBe(1000);
+  });
+});
+
+describe('distributeFixtures', () => {
+  it('keeps all 28 fixtures for eight participants and targets one match across seven periods', () => {
+    const playerIds = Array.from({ length: 8 }, (_, index) => `player-${index + 1}`);
+    const pairings = buildRoundRobin(playerIds, 'ROUND_ROBIN_SINGLE' as any);
+    const distributed = distributeFixtures(pairings, 1, 1);
+    const matchesByPlayerAndPeriod = new Map<string, number>();
+    const fixturesByPeriodAndSlot = new Map<string, number>();
+
+    for (const fixture of distributed) {
+      for (const playerId of [fixture.homePlayerId, fixture.awayPlayerId]) {
+        const key = `${playerId}:${fixture.schedulingPeriod}`;
+        matchesByPlayerAndPeriod.set(key, (matchesByPlayerAndPeriod.get(key) ?? 0) + 1);
+      }
+      const slotKey = `${fixture.schedulingPeriod}:${fixture.concurrencySlot}`;
+      fixturesByPeriodAndSlot.set(slotKey, (fixturesByPeriodAndSlot.get(slotKey) ?? 0) + 1);
+    }
+
+    expect(distributed).toHaveLength(28);
+    expect(new Set(distributed.map(({ schedulingPeriod }) => schedulingPeriod)).size).toBe(7);
+    expect(new Set(distributed.map(({ homePlayerId, awayPlayerId }) => [homePlayerId, awayPlayerId].sort().join(':'))).size).toBe(28);
+    expect(Math.max(...matchesByPlayerAndPeriod.values())).toBe(1);
+    expect(Math.max(...fixturesByPeriodAndSlot.values())).toBe(1);
+    for (const playerId of playerIds) {
+      const appearances = [...matchesByPlayerAndPeriod.entries()]
+        .filter(([key]) => key.startsWith(`${playerId}:`))
+        .reduce((sum, [, count]) => sum + count, 0);
+      expect(appearances).toBe(7);
+    }
+  });
+
+  it('preserves every double-round-robin fixture and caps only simultaneous slot size', () => {
+    const playerIds = Array.from({ length: 8 }, (_, index) => `player-${index + 1}`);
+    const pairings = buildRoundRobin(playerIds, 'ROUND_ROBIN_DOUBLE' as any);
+    const distributed = distributeFixtures(pairings, 3, 2);
+    const fixturesByPeriodAndSlot = new Map<string, number>();
+    const playersByPeriodAndSlot = new Map<string, Set<string>>();
+
+    for (const fixture of distributed) {
+      const key = `${fixture.schedulingPeriod}:${fixture.concurrencySlot}`;
+      fixturesByPeriodAndSlot.set(key, (fixturesByPeriodAndSlot.get(key) ?? 0) + 1);
+      const players = playersByPeriodAndSlot.get(key) ?? new Set<string>();
+      players.add(fixture.homePlayerId);
+      players.add(fixture.awayPlayerId);
+      playersByPeriodAndSlot.set(key, players);
+    }
+
+    expect(distributed).toHaveLength(56);
+    expect(new Set(distributed.map(({ schedulingPeriod }) => schedulingPeriod)).size).toBe(5);
+    expect(Math.max(...fixturesByPeriodAndSlot.values())).toBeLessThanOrEqual(2);
+    expect([...playersByPeriodAndSlot.entries()].every(([key, players]) =>
+      players.size === (fixturesByPeriodAndSlot.get(key) ?? 0) * 2,
+    )).toBe(true);
+  });
+});
+
+describe('validateGeneratedSchedule', () => {
+  it('warns when a complete schedule exceeds the density target without invalidating it', () => {
+    const playerIds = ['A', 'B', 'C', 'D'];
+    const pairings = distributeFixtures(buildRoundRobin(playerIds, 'ROUND_ROBIN_SINGLE' as any), 1, 1);
+    const fixtures = pairings.map((pairing, index) => {
+      const [first, second] = [pairing.homePlayerId, pairing.awayPlayerId].sort();
+      return {
+        id: `fixture-${index + 1}`,
+        schedule_key: `${first}:${second}:${pairing.leg}`,
+        fixture_number: index + 1,
+        scheduling_period_number: 1,
+        concurrency_slot: index + 1,
+        match_week: { week_number: pairing.round },
+        home_player_id: pairing.homePlayerId,
+        away_player_id: pairing.awayPlayerId,
+        match: { id: `match-${index + 1}` },
+      };
+    });
+
+    const validation = validateGeneratedSchedule(
+      pairings,
+      fixtures,
+      playerIds,
+      'ROUND_ROBIN_SINGLE' as any,
+      1,
+      1,
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.totalFixtures).toBe(6);
+    expect(validation.fixturesPerParticipant.every(({ fixtureCount }) => fixtureCount === 3)).toBe(true);
+    expect(validation.fixturesPerSchedulingPeriod).toEqual([{ periodNumber: 1, fixtureCount: 6 }]);
+    expect(validation.maximumFixturesPerParticipantPerPeriod).toBe(3);
+    expect(validation.requiredConcurrentMatches).toBe(1);
+    expect(validation.schedulingPeriodsRequired).toBe(1);
+    expect(validation.densityWarnings).toHaveLength(1);
+    expect(validation.errors).toHaveLength(0);
+  });
+
+  it('rejects invalid pairings and concurrency while retaining density as a warning-only rule', () => {
+    const playerIds = ['A', 'B', 'C', 'D'];
+    const pairings = distributeFixtures(buildRoundRobin(playerIds, 'ROUND_ROBIN_SINGLE' as any), 1, 2);
+    const fixtures = pairings.map((pairing, index) => {
+      const [first, second] = [pairing.homePlayerId, pairing.awayPlayerId].sort();
+      return {
+        id: `fixture-${index + 1}`,
+        schedule_key: `${first}:${second}:${pairing.leg}`,
+        fixture_number: index + 1,
+        scheduling_period_number: 1,
+        concurrency_slot: 1,
+        match_week: { week_number: pairing.round },
+        home_player_id: pairing.homePlayerId,
+        away_player_id: pairing.awayPlayerId,
+        match: { id: `match-${index + 1}` },
+      };
+    });
+    fixtures[0].away_player_id = 'outside-field';
+
+    const validation = validateGeneratedSchedule(
+      pairings,
+      fixtures,
+      playerIds,
+      'ROUND_ROBIN_SINGLE' as any,
+      1,
+      2,
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.some((error) => error.includes('outside the selected competition field'))).toBe(true);
+    expect(validation.errors.some((error) => error.includes('exceeding the configured capacity'))).toBe(true);
+  });
 });
 
 describe('FixtureService.generateDivisionSchedule', () => {
@@ -96,13 +240,143 @@ describe('FixtureService.generateDivisionSchedule', () => {
     { player_id: 'player-d', seed: 4, registered_at: new Date('2026-01-04T00:00:00Z') },
   ];
 
+  it('rejects a 2,000-player double round robin before fixture generation begins', async () => {
+    const largeRegistrationPool = Array.from({ length: 2000 }, (_, index) => ({
+      player_id: `player-${String(index + 1).padStart(4, '0')}`,
+      seed: null,
+      registered_at: new Date('2026-01-01T00:00:00Z'),
+    }));
+    const tx: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: { findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_DOUBLE',
+        capacity: null,
+        competition_participant_count: null,
+        matches_per_participant: 1,
+        concurrent_matches: 1,
+      }) },
+      divisionParticipant: {
+        findMany: vi.fn().mockResolvedValue(largeRegistrationPool),
+        updateMany: vi.fn(),
+      },
+      fixture: { count: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    };
+    const service = new FixtureService(
+      { $transaction: (callback: any) => callback(tx) } as any,
+      {} as any,
+    );
+
+    await expect(service.generateDivisionSchedule('season-id', 'division-id')).rejects.toThrow(
+      `requires 3998000 fixtures`,
+    );
+    expect(tx.divisionParticipant.updateMany).not.toHaveBeenCalled();
+    expect(tx.fixture.count).not.toHaveBeenCalled();
+    expect(tx.fixture.findMany).not.toHaveBeenCalled();
+    expect(tx.fixture.create).not.toHaveBeenCalled();
+    expect(MAX_FIXTURES_PER_GENERATION).toBe(10000);
+  });
+
+  it('reports impractical requested fields without loading fixture rows', async () => {
+    const largeRegistrationPool = Array.from({ length: 2000 }, (_, index) => ({
+      player_id: `player-${String(index + 1).padStart(4, '0')}`,
+      seed: null,
+      registered_at: new Date('2026-01-01T00:00:00Z'),
+    }));
+    const prisma: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: { findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_DOUBLE',
+        capacity: null,
+        registration_capacity: 2000,
+        competition_participant_count: null,
+        scheduling_period_days: 7,
+        matches_per_participant: 1,
+        match_window_start_minutes: null,
+        match_window_end_minutes: null,
+        match_window_timezone: 'UTC',
+        concurrent_matches: 1,
+      }) },
+      divisionParticipant: {
+        findMany: vi.fn().mockResolvedValue(largeRegistrationPool),
+        count: vi.fn().mockResolvedValue(2000),
+      },
+      fixture: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn() },
+    };
+    const service = new FixtureService(prisma, {} as any);
+
+    const status = await service.getDivisionScheduleStatus('season-id', 'division-id');
+
+    expect(status).toMatchObject({
+      registrationCount: 2000,
+      participantCount: 2000,
+      expectedFixtureCount: 3998000,
+      currentFixtureCount: 0,
+      generationStatus: 'BLOCKED',
+    });
+    expect(status.blockers.some((blocker) => blocker.includes('per-transaction generation limit'))).toBe(true);
+    expect(prisma.fixture.findMany).not.toHaveBeenCalled();
+  });
+
+  it('supports 2,000 registrations with an explicitly bounded 64-player double-round-robin field', async () => {
+    const registrations = Array.from({ length: 2000 }, (_, index) => ({
+      player_id: `player-${String(index + 1).padStart(4, '0')}`,
+      seed: null,
+      registered_at: new Date('2026-01-01T00:00:00Z'),
+    }));
+    const prisma: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: { findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_DOUBLE',
+        capacity: 64,
+        registration_capacity: 2000,
+        competition_participant_count: 64,
+        scheduling_period_days: 7,
+        matches_per_participant: 3,
+        match_window_start_minutes: null,
+        match_window_end_minutes: null,
+        match_window_timezone: 'UTC',
+        concurrent_matches: 1,
+      }) },
+      divisionParticipant: {
+        findMany: vi.fn().mockResolvedValue(registrations),
+        count: vi.fn().mockResolvedValue(2000),
+      },
+      fixture: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn() },
+    };
+    const service = new FixtureService(prisma, {} as any);
+
+    const status = await service.getDivisionScheduleStatus('season-id', 'division-id');
+
+    expect(status).toMatchObject({
+      registrationCount: 2000,
+      participantCount: 64,
+      expectedFixtureCount: 4032,
+      generationStatus: 'NOT_GENERATED',
+    });
+    expect(status.blockers).toHaveLength(0);
+    expect(prisma.fixture.findMany).not.toHaveBeenCalled();
+  });
+
   it('persists a numbered, round-assigned single round robin transactionally', async () => {
     const createdFixtures: any[] = [];
     const tx: any = {
       season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
-      division: { findUnique: vi.fn().mockResolvedValue({ id: 'division-id', season_id: 'season-id', name: 'Division 1', active: true, format: 'ROUND_ROBIN_SINGLE' }) },
-      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
+      division: { findUnique: vi.fn().mockResolvedValue({ id: 'division-id', season_id: 'season-id', name: 'Division 1', active: true, format: 'ROUND_ROBIN_SINGLE', matches_per_participant: 1, concurrent_matches: 1 }) },
+      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants), updateMany: vi.fn() },
       fixture: {
+        count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn(async ({ data }) => { createdFixtures.push(data); return { id: `fixture-${data.fixture_number}` }; }),
       },
@@ -124,12 +398,107 @@ describe('FixtureService.generateDivisionSchedule', () => {
 
     const result = await service.generateDivisionSchedule('season-id', 'division-id', { id: 'admin-id' });
 
-    expect(result).toMatchObject({ status: 'GENERATED', participantCount: 4, roundCount: 3, expectedFixtureCount: 6, fixtureCount: 6 });
+    expect(result).toMatchObject({ status: 'GENERATED', participantCount: 4, roundCount: 3, schedulingPeriodCount: 3, expectedFixtureCount: 6, fixtureCount: 6 });
+    expect(createdFixtures.map(({ scheduling_period_number }) => scheduling_period_number)).toEqual([1, 1, 2, 2, 3, 3]);
     expect(createdFixtures.map(({ fixture_number }) => fixture_number)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(createdFixtures.every(({ status }) => status === 'SCHEDULED')).toBe(true);
     expect(tx.match.create).toHaveBeenCalledTimes(6);
     expect(tx.matchParticipant.createMany).toHaveBeenCalledTimes(6);
     expect(outbox.enqueueEvent).toHaveBeenCalledWith(tx, expect.objectContaining({ eventName: 'division.fixtures_generated' }));
+  });
+
+  it('selects only the configured field in deterministic seed order and clears all other selection markers', async () => {
+    const seededFirst = { player_id: 'seeded-first', seed: 1, registered_at: new Date('2026-01-04T00:00:00Z') };
+    const seededSecond = { player_id: 'seeded-second', seed: 2, registered_at: new Date('2026-01-03T00:00:00Z') };
+    const unseededFirst = { player_id: 'unseeded-first', seed: null, registered_at: new Date('2026-01-01T00:00:00Z') };
+    const unseededSecond = { player_id: 'unseeded-second', seed: null, registered_at: new Date('2026-01-02T00:00:00Z') };
+    const allRegistrations = [unseededFirst, seededSecond, unseededSecond, seededFirst];
+    const createdFixtures: any[] = [];
+    const tx: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: { findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_SINGLE',
+        capacity: 64,
+        competition_participant_count: 2,
+        matches_per_participant: 1,
+        concurrent_matches: 1,
+      }) },
+      divisionParticipant: {
+        findMany: vi.fn().mockResolvedValue(allRegistrations),
+        updateMany: vi.fn(),
+      },
+      fixture: {
+        count: vi.fn().mockResolvedValue(0),
+        findMany: vi.fn().mockResolvedValue([]),
+        create: vi.fn(async ({ data }) => { createdFixtures.push(data); return { id: 'fixture-1' }; }),
+      },
+      matchWeek: {
+        upsert: vi.fn(async ({ create }) => ({ id: 'week-1', week_number: create.week_number })),
+        findMany: vi.fn().mockResolvedValue([{ id: 'week-1', week_number: 1 }]),
+      },
+      match: { create: vi.fn().mockResolvedValue({ id: 'match-1' }) },
+      matchParticipant: { createMany: vi.fn() },
+    };
+    const service = new FixtureService(
+      { $transaction: (callback: any) => callback(tx) } as any,
+      { enqueueEvent: vi.fn() } as any,
+    );
+
+    const result = await service.generateDivisionSchedule('season-id', 'division-id');
+
+    expect(result).toMatchObject({ participantCount: 2, expectedFixtureCount: 1, fixtureCount: 1 });
+    expect(createdFixtures).toHaveLength(1);
+    expect(new Set([createdFixtures[0].home_player_id, createdFixtures[0].away_player_id])).toEqual(
+      new Set(['seeded-first', 'seeded-second']),
+    );
+    expect(tx.divisionParticipant.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { season_id: 'season-id', division_id: 'division-id' },
+      data: { competition_selected: false },
+    });
+    expect(tx.divisionParticipant.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        season_id: 'season-id',
+        division_id: 'division-id',
+        player_id: { in: ['seeded-first', 'seeded-second'] },
+      },
+      data: { competition_selected: true },
+    });
+  });
+
+  it('reports all registrations separately from the resolved competition field', async () => {
+    const prisma: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: { findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_SINGLE',
+        capacity: 64,
+        competition_participant_count: 2,
+        registration_capacity: 2000,
+        scheduling_period_days: 7,
+        matches_per_participant: 1,
+        match_window_start_minutes: null,
+        match_window_end_minutes: null,
+        match_window_timezone: 'UTC',
+        concurrent_matches: 1,
+      }) },
+      divisionParticipant: {
+        findMany: vi.fn().mockResolvedValue(participants),
+        count: vi.fn().mockResolvedValue(1850),
+      },
+      fixture: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn() },
+    };
+    const service = new FixtureService(prisma, {} as any);
+
+    const status = await service.getDivisionScheduleStatus('season-id', 'division-id');
+
+    expect(status).toMatchObject({ registrationCount: 1850, participantCount: 2, expectedFixtureCount: 1 });
   });
 
   it('rejects generation until the season roster is locked', async () => {
@@ -145,12 +514,15 @@ describe('FixtureService.generateDivisionSchedule', () => {
 
   it('returns ALREADY_GENERATED only for the complete matching schedule', async () => {
     const pairings = buildRoundRobin(participants.map(({ player_id }) => player_id), 'ROUND_ROBIN_SINGLE' as any);
-    const fixtures = pairings.map((pairing, index) => {
+    const distributedPairings = distributeFixtures(pairings, 1, 1);
+    const fixtures = distributedPairings.map((pairing, index) => {
       const [first, second] = [pairing.homePlayerId, pairing.awayPlayerId].sort();
       return {
         id: `fixture-${index + 1}`,
         schedule_key: `${first}:${second}:${pairing.leg}`,
         fixture_number: index + 1,
+        scheduling_period_number: pairing.schedulingPeriod,
+        concurrency_slot: pairing.concurrencySlot,
         match_week: { week_number: pairing.round },
         home_player_id: pairing.homePlayerId,
         away_player_id: pairing.awayPlayerId,
@@ -159,9 +531,9 @@ describe('FixtureService.generateDivisionSchedule', () => {
     });
     const tx: any = {
       season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
-      division: { findUnique: vi.fn().mockResolvedValue({ id: 'division-id', season_id: 'season-id', name: 'Division 1', active: true, format: 'ROUND_ROBIN_SINGLE' }) },
-      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
-      fixture: { findMany: vi.fn().mockResolvedValue(fixtures) },
+      division: { findUnique: vi.fn().mockResolvedValue({ id: 'division-id', season_id: 'season-id', name: 'Division 1', active: true, format: 'ROUND_ROBIN_SINGLE', matches_per_participant: 1, concurrent_matches: 1 }) },
+      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants), updateMany: vi.fn() },
+      fixture: { count: vi.fn().mockResolvedValue(fixtures.length), findMany: vi.fn().mockResolvedValue(fixtures) },
     };
     const service = new FixtureService({ $transaction: (callback: any) => callback(tx) } as any, {} as any);
 
@@ -171,16 +543,53 @@ describe('FixtureService.generateDivisionSchedule', () => {
   });
 
   it('does not treat a partial generated schedule as complete', async () => {
-    const tx: any = {
-      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
-      division: { findUnique: vi.fn().mockResolvedValue({ id: 'division-id', season_id: 'season-id', name: 'Division 1', active: true, format: 'ROUND_ROBIN_SINGLE' }) },
-      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
-      fixture: { findMany: vi.fn().mockResolvedValue([{ id: 'fixture-1', schedule_key: 'player-a:player-b:1' }]) },
-    };
-    const service = new FixtureService({ $transaction: (callback: any) => callback(tx) } as any, {} as any);
+  const tx: any = {
+    season: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: 'season-id',
+        status: 'ROSTER_LOCKED',
+      }),
+    },
+    division: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        name: 'Division 1',
+        active: true,
+        format: 'ROUND_ROBIN_SINGLE',
+        matches_per_participant: 1,
+        concurrent_matches: 1,
+      }),
+    },
+    divisionParticipant: {
+      findMany: vi.fn().mockResolvedValue(participants),
+      updateMany: vi.fn(),
+    },
+    fixture: {
+      count: vi.fn().mockResolvedValue(1),
+      findMany: vi.fn().mockResolvedValue([
+        {
+          id: 'fixture-1',
+          schedule_key: 'player-a:player-b:1',
+          fixture_number: 1,
+          scheduling_period_number: 1,
+          concurrency_slot: 1,
+          match_week: { week_number: 1 },
+          home_player_id: 'player-a',
+          away_player_id: 'player-b',
+          match: { id: 'match-1' },
+        },
+      ]),
+    },
+  };
 
-    await expect(service.generateDivisionSchedule('season-id', 'division-id')).rejects.toThrow(
-      'do not match the complete generated schedule of 6',
-    );
-  });
+  const service = new FixtureService(
+    { $transaction: (callback: any) => callback(tx) } as any,
+    {} as any,
+  );
+
+  await expect(
+    service.generateDivisionSchedule('season-id', 'division-id'),
+  ).rejects.toThrow('Existing fixtures failed schedule validation');
+});
 });

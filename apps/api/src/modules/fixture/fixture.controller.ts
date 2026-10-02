@@ -10,6 +10,7 @@ export class FixtureController {
   constructor(private readonly fixtureService: FixtureService) {}
 
   @Get('seasons/:seasonId')
+  @RequirePermission(PermissionName.MANAGE_MATCHES)
   getSeasonScheduleStatus(@Param('seasonId') seasonId: string) {
     return this.fixtureService.getSeasonScheduleStatus(seasonId);
   }
