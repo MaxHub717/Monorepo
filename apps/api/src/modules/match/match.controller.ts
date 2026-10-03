@@ -1,11 +1,16 @@
-import { Body, Controller, Get, Post, UseGuards, Param, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards, Param, Req, UnauthorizedException } from '@nestjs/common';
 import { PermissionName } from '../../common/authz/authz.types.js';
 import { RequirePermission, RequireOperatorScope } from '../../common/authz/authz.decorators.js';
 import { AuthGuard, AccountStatusGuard, PermissionsGuard, OperatorScopeGuard } from '../../common/authz/authz.guards.js';
-import { MatchService, CreateMatchDto, SubmitMatchResultDto } from './match.service.js';
+import { MatchService, CreateMatchDto, SubmitMatchResultDto, TransitionMatchDto } from './match.service.js';
 
 interface AuthRequest {
-  user?: { id?: string; roles?: string[] };
+  id?: string;
+  user?: {
+    id?: string;
+    roles?: string[];
+    operatorProfile?: { assigned_division_id?: string | null } | null;
+  };
 }
 
 @Controller('matches')
@@ -37,13 +42,40 @@ export class MatchController {
     return this.matchService.submitMatchResult(dto, {
       id: actorId,
       roles: req.user?.roles ?? [],
+      operatorProfile: req.user?.operatorProfile,
+      correlationId: req.id,
     });
+  }
+
+  @Patch(':id/status')
+  @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
+  @RequirePermission(PermissionName.MANAGE_MATCHES)
+  async transitionStatus(
+    @Param('id') id: string,
+    @Body() dto: TransitionMatchDto,
+    @Req() req: AuthRequest,
+  ) {
+    const actorId = req.user?.id;
+    if (!actorId) throw new UnauthorizedException('Authenticated user identity is required for match transitions');
+    return this.matchService.transitionMatch(id, dto.status, {
+      id: actorId,
+      roles: req.user?.roles ?? [],
+      operatorProfile: req.user?.operatorProfile,
+      correlationId: req.id,
+    }, dto.reason);
   }
 
   @Post(':id/confirm')
   @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
   @RequirePermission(PermissionName.MANAGE_RESULTS)
-  async confirmResult(@Param('id') id: string) {
-    return this.matchService.confirmMatchResult(id);
+  async confirmResult(@Param('id') id: string, @Req() req: AuthRequest) {
+    const actorId = req.user?.id;
+    if (!actorId) throw new UnauthorizedException('Authenticated user identity is required to confirm a match result');
+    return this.matchService.confirmMatchResult(id, {
+      id: actorId,
+      roles: req.user?.roles ?? [],
+      operatorProfile: req.user?.operatorProfile,
+      correlationId: req.id,
+    });
   }
 }

@@ -386,7 +386,12 @@ export type DivisionFixtureSchedule = {
   participantCount: number;
   expectedFixtureCount: number;
   currentFixtureCount: number;
+  scheduledFixtureCount: number;
+  unscheduledFixtureCount: number;
   roundCount: number;
+  currentRound: number | null;
+  conflictCount: number | null;
+  scheduleLocked: boolean;
   generationStatus: 'BLOCKED' | 'NOT_GENERATED' | 'GENERATED' | 'INCOMPLETE';
   validation: {
     valid: boolean;
@@ -406,8 +411,33 @@ export type DivisionFixtureSchedule = {
 
 export type SeasonFixtureSchedule = {
   seasonId: string;
+  seasonName: string;
+  leagueName: string;
   seasonStatus: string;
   divisions: DivisionFixtureSchedule[];
+};
+
+export type DivisionFixturePage = {
+  divisionId: string;
+  scheduleLocked: boolean;
+  fixtures: Array<{
+    id: string;
+    fixtureNumber: number | null;
+    scheduledAt: string | null;
+    timezone: string | null;
+    checkInOpensAt: string | null;
+    checkInClosesAt: string | null;
+    playWindowOpensAt: string | null;
+    playWindowClosesAt: string | null;
+    schedulingStatus: string;
+    status: string;
+    roundNumber: number | null;
+    schedulingPeriodNumber: number | null;
+    homePlayer: { id: string; gamerTag: string };
+    awayPlayer: { id: string; gamerTag: string };
+    matchStatus: string | null;
+  }>;
+  pagination: { page: number; limit: number; total: number; totalPages: number };
 };
 
 export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
@@ -669,6 +699,44 @@ export async function lockSeasonRoster(seasonId: string): Promise<SeasonSummary>
 
 export async function generateDivisionFixtures(seasonId: string, divisionId: string): Promise<unknown> {
   return apiFetch<unknown>(`/fixtures/seasons/${seasonId}/divisions/${divisionId}/generate`, { method: 'POST' });
+}
+
+export async function getDivisionFixtures(
+  seasonId: string,
+  divisionId: string,
+  page = 1,
+  limit = 25,
+): Promise<DivisionFixturePage> {
+  return apiFetch<DivisionFixturePage>(
+    `/fixtures/seasons/${seasonId}/divisions/${divisionId}?page=${page}&limit=${limit}`,
+    { cache: 'no-store' },
+  );
+}
+
+export async function updateFixtureSchedule(
+  seasonId: string,
+  divisionId: string,
+  fixtureId: string,
+  appointment: {
+    scheduledAt: string;
+    timezone: string;
+    checkInOpensAt: string;
+    checkInClosesAt: string;
+    playWindowOpensAt: string;
+    playWindowClosesAt: string;
+  },
+) {
+  return apiFetch<unknown>(
+    `/fixtures/seasons/${seasonId}/divisions/${divisionId}/fixtures/${fixtureId}/schedule`,
+    { method: 'PATCH', body: JSON.stringify(appointment) },
+  );
+}
+
+export async function lockDivisionSchedule(seasonId: string, divisionId: string) {
+  return apiFetch<{ scheduleLocked: boolean }>(
+    `/fixtures/seasons/${seasonId}/divisions/${divisionId}/lock`,
+    { method: 'POST' },
+  );
 }
 
 export async function getSeasonFixtureSchedule(seasonId: string): Promise<SeasonFixtureSchedule> {

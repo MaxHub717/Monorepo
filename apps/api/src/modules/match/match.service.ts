@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { IsDateString, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
-import { Prisma } from '@prisma/client';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
 
@@ -39,9 +39,44 @@ export class SubmitMatchResultDto {
   awayScore!: number;
 }
 
-export interface MatchResultActor {
-  id: string;
+export class TransitionMatchDto {
+  @IsEnum(MatchStatus)
+  status!: MatchStatus;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export interface MatchTransitionActor {
+  id?: string;
   roles?: string[];
+  operatorProfile?: { assigned_division_id?: string | null } | null;
+  correlationId?: string;
+}
+
+export const VALID_MATCH_TRANSITIONS: Record<MatchStatus, readonly MatchStatus[]> = {
+  DRAFT: [MatchStatus.SCHEDULED, MatchStatus.CANCELLED],
+  SCHEDULED: [MatchStatus.CHECK_IN_OPEN, MatchStatus.CANCELLED],
+  CHECK_IN_OPEN: [MatchStatus.CHECKED_IN, MatchStatus.CANCELLED],
+  CHECK_IN_CLOSED: [MatchStatus.IN_PROGRESS, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  CHECKED_IN: [MatchStatus.IN_PROGRESS, MatchStatus.CANCELLED],
+  IN_PROGRESS: [MatchStatus.AWAITING_RESULT, MatchStatus.RESULT_SUBMITTED, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  AWAITING_RESULT: [MatchStatus.RESULT_SUBMITTED, MatchStatus.UNDER_REVIEW, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  RESULT_SUBMITTED: [MatchStatus.UNDER_REVIEW, MatchStatus.COMPLETED, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  SUBMISSION_PENDING: [MatchStatus.RESULT_SUBMITTED, MatchStatus.UNDER_REVIEW, MatchStatus.COMPLETED, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  UNDER_REVIEW: [MatchStatus.COMPLETED, MatchStatus.DISPUTED, MatchStatus.CANCELLED],
+  DISPUTED: [MatchStatus.UNDER_REVIEW, MatchStatus.COMPLETED, MatchStatus.CANCELLED],
+  CONFIRMED: [MatchStatus.COMPLETED],
+  COMPLETED: [],
+  CANCELLED: [],
+  FORFEITED: [],
+  VOID: [],
+  ARCHIVED: [],
+};
+
+export interface MatchResultActor extends MatchTransitionActor {
+  id: string;
 }
 
 @Injectable()
@@ -50,6 +85,109 @@ export class MatchService {
     private readonly prisma: PrismaService,
     private readonly outboxService: OutboxService,
   ) {}
+
+  async transitionMatch(matchId: string, status: MatchStatus, actor: MatchTransitionActor, reason?: string) {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const match = await tx.match.findUnique({
+        where: { id: matchId },
+        include: { fixture: true, result: true },
+      });
+      if (!match) throw new NotFoundException('Match not found');
+      this.assertOperatorScope(match.division_id, actor);
+      return this.applyTransition(tx, match, status, actor, reason);
+    });
+  }
+
+  private assertOperatorScope(divisionId: string, actor: MatchTransitionActor) {
+    if (!actor.roles?.includes('OPERATOR')) return;
+    if (!actor.operatorProfile?.assigned_division_id) {
+      throw new ForbiddenException('Operator division scope is required for match operations');
+    }
+    if (actor.operatorProfile.assigned_division_id !== divisionId) {
+      throw new ForbiddenException('Operator may not act outside the assigned division');
+    }
+  }
+
+  private async applyTransition(
+    tx: Prisma.TransactionClient,
+    match: any,
+    nextStatus: MatchStatus,
+    actor: MatchTransitionActor,
+    reason?: string,
+  ) {
+    if (!VALID_MATCH_TRANSITIONS[match.status as MatchStatus]?.includes(nextStatus)) {
+      throw new BadRequestException(`Invalid match transition from ${match.status} to ${nextStatus}`);
+    }
+    if (['CANCELLED', 'DISPUTED'].includes(nextStatus) && !reason?.trim()) {
+      throw new BadRequestException(`A reason is required when transitioning a match to ${nextStatus}`);
+    }
+
+    const now = new Date();
+    if (nextStatus === MatchStatus.CHECK_IN_OPEN) {
+      const opens = match.fixture?.check_in_opens_at;
+      const closes = match.fixture?.check_in_closes_at;
+      if (!opens || !closes || now < opens || now >= closes) {
+        throw new BadRequestException('Check-in can only be opened during the configured check-in window');
+      }
+    }
+    if (nextStatus === MatchStatus.CHECKED_IN) {
+      const closes = match.fixture?.check_in_closes_at;
+      if (!closes || now >= closes) {
+        throw new BadRequestException('Participants can only be checked in before the configured check-in window closes');
+      }
+    }
+    if (nextStatus === MatchStatus.IN_PROGRESS) {
+      const opens = match.fixture?.play_window_opens_at;
+      const closes = match.fixture?.play_window_closes_at;
+      if (!opens || !closes || now < opens || now > closes) {
+        throw new BadRequestException('A match can only start during its configured play window');
+      }
+    }
+    if (nextStatus === MatchStatus.RESULT_SUBMITTED) {
+      const result = await tx.matchResult.findUnique({ where: { match_id: match.id }, select: { id: true } });
+      if (!result) throw new BadRequestException('A result must exist before entering RESULT_SUBMITTED');
+    }
+    if (nextStatus === MatchStatus.COMPLETED && !match.result?.confirmed_at) {
+      throw new BadRequestException('A confirmed result is required before completing a match');
+    }
+
+    const updated = await tx.match.update({
+      where: { id: match.id },
+      data: {
+        status: nextStatus,
+        started_at: nextStatus === MatchStatus.IN_PROGRESS ? now : undefined,
+       ended_at: new Set<MatchStatus>([
+  MatchStatus.COMPLETED,
+  MatchStatus.CANCELLED,
+]).has(nextStatus)
+  ? now
+  : undefined,
+      },
+    });
+    await tx.matchStatusTransition.create({
+      data: {
+        match_id: match.id,
+        from_status: match.status,
+        to_status: nextStatus,
+        actor_id: actor.id,
+        actor_role: actor.roles?.[0],
+        reason: reason?.trim() || null,
+        correlation_id: actor.correlationId,
+        transitioned_at: now,
+      },
+    });
+    await this.outboxService.enqueueEvent(tx, {
+      eventName: 'match.status.transitioned',
+      aggregateType: 'Match',
+      aggregateId: match.id,
+      actorId: actor.id,
+      actorRole: actor.roles?.[0],
+      correlationId: actor.correlationId,
+      reason: reason?.trim(),
+      metadata: { fromStatus: match.status, toStatus: nextStatus, transitionedAt: now },
+    });
+    return updated;
+  }
 
   async listMatches() {
     return this.prisma.match.findMany({
@@ -177,9 +315,13 @@ export class MatchService {
       });
 
       if (!match) throw new NotFoundException('Match not found');
-      if (['ARCHIVED', 'VOID', 'CONFIRMED'].includes(match.status)) {
+      if (!new Set<MatchStatus>([
+  MatchStatus.IN_PROGRESS,
+  MatchStatus.AWAITING_RESULT,
+]).has(match.status as MatchStatus)) {
         throw new BadRequestException('Cannot submit a result for this match');
       }
+      this.assertOperatorScope(match.division_id, actor);
       if (match.result) throw new BadRequestException('Result has already been submitted for this match');
 
       const isParticipant = [
@@ -235,10 +377,28 @@ export class MatchService {
         },
       });
 
-      const updatedMatch = await tx.match.update({
-        where: { id: match.id },
-        data: { status: 'SUBMISSION_PENDING' },
-      });
+      let currentMatch = match;
+
+if (currentMatch.status === MatchStatus.IN_PROGRESS) {
+  await this.applyTransition(
+    tx,
+    currentMatch,
+    MatchStatus.AWAITING_RESULT,
+    actor,
+  );
+
+  currentMatch = {
+    ...currentMatch,
+    status: MatchStatus.AWAITING_RESULT,
+  };
+}
+
+const updatedMatch = await this.applyTransition(
+  tx,
+  { ...currentMatch, result: createdResult },
+  MatchStatus.RESULT_SUBMITTED,
+  actor,
+);
 
       await this.outboxService.enqueueEvent(tx, {
         eventName: 'match.result.submitted',
@@ -256,7 +416,7 @@ export class MatchService {
     });
   }
 
-  async confirmMatchResult(matchId: string) {
+  async confirmMatchResult(matchId: string, actor: MatchTransitionActor = {}) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const match = await tx.match.findUnique({
         where: { id: matchId },
@@ -264,6 +424,7 @@ export class MatchService {
       });
 
       if (!match || !match.result) throw new NotFoundException('Match result not found');
+      this.assertOperatorScope(match.division_id, actor);
       if (match.status === 'VOID' || match.status === 'ARCHIVED') {
         throw new BadRequestException('Cannot confirm a void or archived match');
       }
@@ -277,15 +438,20 @@ export class MatchService {
         data: { confirmed_at: now },
       });
 
-      const updatedMatch = await tx.match.update({
-        where: { id: match.id },
-        data: { status: 'CONFIRMED', ended_at: now },
-      });
+      const updatedMatch = await this.applyTransition(
+        tx,
+        { ...match, result: confirmedResult },
+        MatchStatus.COMPLETED,
+        actor,
+      );
 
       await this.outboxService.enqueueEvent(tx, {
         eventName: 'match.result.confirmed',
         aggregateType: 'Match',
         aggregateId: match.id,
+        actorId: actor.id,
+        actorRole: actor.roles?.[0],
+        correlationId: actor.correlationId,
         metadata: { match: updatedMatch, result: confirmedResult },
       });
 

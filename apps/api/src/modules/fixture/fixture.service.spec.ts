@@ -592,4 +592,185 @@ describe('FixtureService.generateDivisionSchedule', () => {
     service.generateDivisionSchedule('season-id', 'division-id'),
   ).rejects.toThrow('Existing fixtures failed schedule validation');
 });
+
+function fixtureAppointment(hoursFromNow = 48) {
+  const appointment = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000);
+  appointment.setUTCSeconds(0, 0);
+  const at = (offsetMinutes: number) => new Date(appointment.getTime() + offsetMinutes * 60_000).toISOString();
+  return {
+    scheduledAt: appointment.toISOString(),
+    timezone: 'UTC',
+    checkInOpensAt: at(-120),
+    checkInClosesAt: at(-60),
+    playWindowOpensAt: at(-30),
+    playWindowClosesAt: at(120),
+  };
+}
+
+function createScheduleFixtureService(options: {
+  fixture?: Record<string, any>;
+  overlappingFixtures?: Array<Record<string, any>>;
+  timezone?: string;
+  matchWindowStartMinutes?: number | null;
+  matchWindowEndMinutes?: number | null;
+} = {}) {
+  const fixture = {
+    id: 'fixture-id',
+    scheduled_at: null,
+    scheduled_timezone: null,
+    check_in_opens_at: null,
+    check_in_closes_at: null,
+    play_window_opens_at: null,
+    play_window_closes_at: null,
+    home_player_id: 'home-player',
+    away_player_id: 'away-player',
+    match_week: { id: 'week-id', week_number: 1, start_date: null, end_date: null },
+    match: { id: 'match-id', status: 'SCHEDULED' },
+    ...options.fixture,
+  };
+  const tx: any = {
+    season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+    division: {
+      findFirst: vi.fn().mockResolvedValue({
+        id: 'division-id',
+        season_id: 'season-id',
+        schedule_locked: false,
+        concurrent_matches: 1,
+        match_window_start_minutes: options.matchWindowStartMinutes ?? null,
+        match_window_end_minutes: options.matchWindowEndMinutes ?? null,
+        match_window_timezone: options.timezone ?? 'UTC',
+      }),
+    },
+    fixture: {
+      findFirst: vi.fn().mockResolvedValue(fixture),
+      findMany: vi.fn().mockResolvedValue(options.overlappingFixtures ?? []),
+      update: vi.fn(async ({ data }) => ({ ...fixture, ...data })),
+    },
+  };
+  const outbox = { enqueueEvent: vi.fn() };
+  const prisma = { $transaction: vi.fn(async (callback: any) => callback(tx)) };
+  return { service: new FixtureService(prisma as any, outbox as any), tx, outbox, fixture };
+}
+
+describe('FixtureService.scheduleFixture', () => {
+  it('persists an appointment timezone and explicit check-in/play windows', async () => {
+    const appointment = fixtureAppointment();
+    const { service, tx, outbox } = createScheduleFixtureService();
+
+    await service.scheduleFixture('season-id', 'division-id', 'fixture-id', appointment, { id: 'operator-id' });
+
+    expect(tx.fixture.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'fixture-id' },
+      data: expect.objectContaining({
+        scheduled_at: new Date(appointment.scheduledAt),
+        scheduled_timezone: 'UTC',
+        check_in_opens_at: new Date(appointment.checkInOpensAt),
+        check_in_closes_at: new Date(appointment.checkInClosesAt),
+        play_window_opens_at: new Date(appointment.playWindowOpensAt),
+        play_window_closes_at: new Date(appointment.playWindowClosesAt),
+        scheduling_status: 'SCHEDULED',
+      }),
+    }));
+    expect(outbox.enqueueEvent).toHaveBeenCalledWith(tx, expect.objectContaining({
+      eventName: 'fixture.scheduled',
+      actorId: 'operator-id',
+      metadata: expect.objectContaining({ before: expect.any(Object), after: expect.any(Object) }),
+    }));
+  });
+
+  it('marks rescheduling explicitly and preserves the previous appointment in its event', async () => {
+    const previous = fixtureAppointment();
+    const next = fixtureAppointment(72);
+    const priorAt = new Date(previous.scheduledAt);
+    const { service, tx, outbox } = createScheduleFixtureService({
+      fixture: {
+        scheduled_at: priorAt,
+        scheduled_timezone: previous.timezone,
+        check_in_opens_at: new Date(previous.checkInOpensAt),
+        check_in_closes_at: new Date(previous.checkInClosesAt),
+        play_window_opens_at: new Date(previous.playWindowOpensAt),
+        play_window_closes_at: new Date(previous.playWindowClosesAt),
+        scheduling_status: 'SCHEDULED',
+      },
+    });
+
+    await service.scheduleFixture('season-id', 'division-id', 'fixture-id', next);
+
+    expect(tx.fixture.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ scheduling_status: 'RESCHEDULED' }),
+    }));
+    expect(outbox.enqueueEvent).toHaveBeenCalledWith(tx, expect.objectContaining({
+      eventName: 'fixture.rescheduled',
+      metadata: expect.objectContaining({ before: expect.objectContaining({ scheduledAt: priorAt }) }),
+    }));
+  });
+
+  it('rejects timezone-less instants, invalid timezones, and windows in the past', async () => {
+    const { service, tx } = createScheduleFixtureService();
+    const valid = fixtureAppointment();
+
+    await expect(service.scheduleFixture('season-id', 'division-id', 'fixture-id', {
+      ...valid,
+      scheduledAt: valid.scheduledAt.slice(0, -1),
+    })).rejects.toThrow('explicit timezone offset');
+    await expect(service.scheduleFixture('season-id', 'division-id', 'fixture-id', {
+      ...valid,
+      timezone: 'Not/A_Timezone',
+    })).rejects.toThrow('not a valid IANA timezone');
+    await expect(service.scheduleFixture('season-id', 'division-id', 'fixture-id', {
+      ...valid,
+      checkInOpensAt: new Date(Date.now() - 60_000).toISOString(),
+    })).rejects.toThrow('in the past');
+    expect(tx.fixture.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid window ordering and round-window overflow', async () => {
+    const valid = fixtureAppointment();
+    const invalidOrder = createScheduleFixtureService();
+    await expect(invalidOrder.service.scheduleFixture('season-id', 'division-id', 'fixture-id', {
+      ...valid,
+      checkInClosesAt: valid.playWindowClosesAt,
+    })).rejects.toThrow('Scheduling windows must follow');
+
+    const outsideRound = createScheduleFixtureService({
+      fixture: {
+        match_week: {
+          id: 'week-id',
+          week_number: 1,
+          start_date: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+          end_date: null,
+        },
+      },
+    });
+    await expect(outsideRound.service.scheduleFixture('season-id', 'division-id', 'fixture-id', valid))
+      .rejects.toThrow('before the configured round window');
+  });
+
+  it('rejects overlapping participant appointments and respects concurrent match capacity', async () => {
+    const appointment = fixtureAppointment();
+    const { service: playerConflict } = createScheduleFixtureService({
+      overlappingFixtures: [{ id: 'other-fixture', home_player_id: 'home-player', away_player_id: 'third-player' }],
+    });
+    await expect(playerConflict.scheduleFixture('season-id', 'division-id', 'fixture-id', appointment))
+      .rejects.toThrow('participant already has a fixture scheduled');
+
+    const { service: capacityConflict } = createScheduleFixtureService({
+      overlappingFixtures: [{ id: 'other-fixture', home_player_id: 'third-player', away_player_id: 'fourth-player' }],
+    });
+    await expect(capacityConflict.scheduleFixture('season-id', 'division-id', 'fixture-id', appointment))
+      .rejects.toThrow('configured concurrency capacity');
+  });
+
+  it('prevents scheduling after match execution starts or after schedule lock', async () => {
+    const appointment = fixtureAppointment();
+    const started = createScheduleFixtureService({ fixture: { match: { id: 'match-id', status: 'IN_PROGRESS' } } });
+    await expect(started.service.scheduleFixture('season-id', 'division-id', 'fixture-id', appointment))
+      .rejects.toThrow('after match execution begins');
+
+    const locked = createScheduleFixtureService();
+    locked.tx.division.findFirst.mockResolvedValue({ id: 'division-id', schedule_locked: true });
+    await expect(locked.service.scheduleFixture('season-id', 'division-id', 'fixture-id', appointment))
+      .rejects.toThrow('schedule is locked');
+  });
+});
 });

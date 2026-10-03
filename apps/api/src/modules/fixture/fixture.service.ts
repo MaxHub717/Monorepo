@@ -2,7 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, CompetitionFormat } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
-import { DivisionFixtureStatusDto, FixtureScheduleValidationDto, SeasonFixtureStatusDto } from './fixture.dto.js';
+import {
+  DivisionFixtureStatusDto,
+  FixturePageDto,
+  FixturePageQueryDto,
+  FixtureScheduleValidationDto,
+  ScheduleFixtureDto,
+  SeasonFixtureStatusDto,
+} from './fixture.dto.js';
 import { eligiblePlayerProfileWhere } from '../participation/eligibility.js';
 import {
   expectedRoundRobinFixtureCount,
@@ -39,7 +46,15 @@ interface ScheduleFixtureRecord {
   match_week: { week_number: number } | null;
   home_player_id: string;
   away_player_id: string;
-  match: { id: string } | null;
+  scheduled_at?: Date | null;
+  scheduled_timezone?: string | null;
+  check_in_opens_at?: Date | null;
+  check_in_closes_at?: Date | null;
+  play_window_opens_at?: Date | null;
+  play_window_closes_at?: Date | null;
+  scheduling_status?: string;
+  status?: string;
+  match: { id: string; status?: string } | null;
 }
 
 @Injectable()
@@ -305,7 +320,15 @@ export class FixtureService {
   }
 
   async getSeasonScheduleStatus(seasonId: string): Promise<SeasonFixtureStatusDto> {
-    const season = await this.prisma.season.findUnique({ where: { id: seasonId }, select: { id: true, status: true } });
+    const season = await this.prisma.season.findUnique({
+      where: { id: seasonId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        league: { select: { name: true } },
+      },
+    });
     if (!season) throw new NotFoundException('Season not found');
 
     const divisions = await this.prisma.division.findMany({
@@ -316,9 +339,339 @@ export class FixtureService {
 
     return {
       seasonId,
+      seasonName: season.name,
+      leagueName: season.league.name,
       seasonStatus: season.status,
       divisions: await Promise.all(divisions.map(({ id }) => this.getDivisionScheduleStatus(seasonId, id))),
     };
+  }
+
+  async getDivisionFixtures(
+    seasonId: string,
+    divisionId: string,
+    query: FixturePageQueryDto,
+  ): Promise<FixturePageDto> {
+    const division = await this.prisma.division.findFirst({
+      where: { id: divisionId, season_id: seasonId },
+      select: { id: true, schedule_locked: true },
+    });
+    if (!division) throw new NotFoundException('Division not found in this season');
+
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 25));
+    const where = { division_id: divisionId };
+    const [total, fixtures] = await Promise.all([
+      this.prisma.fixture.count({ where }),
+      this.prisma.fixture.findMany({
+        where,
+        orderBy: [{ fixture_number: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          fixture_number: true,
+          scheduled_at: true,
+          scheduled_timezone: true,
+          check_in_opens_at: true,
+          check_in_closes_at: true,
+          play_window_opens_at: true,
+          play_window_closes_at: true,
+          scheduling_status: true,
+          status: true,
+          scheduling_period_number: true,
+          match_week: { select: { week_number: true } },
+          home_player: { select: { id: true, gamer_tag: true } },
+          away_player: { select: { id: true, gamer_tag: true } },
+          match: { select: { status: true } },
+        },
+      }),
+    ]);
+
+    return {
+      divisionId,
+      scheduleLocked: division.schedule_locked,
+      fixtures: fixtures.map((fixture) => ({
+  id: fixture.id,
+  fixtureNumber: fixture.fixture_number,
+  scheduledAt: fixture.scheduled_at?.toISOString() ?? null,
+  timezone: fixture.scheduled_timezone,
+  checkInOpensAt: fixture.check_in_opens_at?.toISOString() ?? null,
+  checkInClosesAt: fixture.check_in_closes_at?.toISOString() ?? null,
+  playWindowOpensAt: fixture.play_window_opens_at?.toISOString() ?? null,
+  playWindowClosesAt: fixture.play_window_closes_at?.toISOString() ?? null,
+  schedulingStatus: fixture.scheduling_status,
+  status: fixture.status,
+  roundNumber: fixture.match_week?.week_number ?? null,
+  schedulingPeriodNumber: fixture.scheduling_period_number,
+  homePlayer: {
+    id: fixture.home_player.id,
+    gamerTag: fixture.home_player.gamer_tag,
+  },
+  awayPlayer: {
+    id: fixture.away_player.id,
+    gamerTag: fixture.away_player.gamer_tag,
+  },
+  matchStatus: fixture.match?.status ?? null,
+})),
+  
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async scheduleFixture(
+    seasonId: string,
+    divisionId: string,
+    fixtureId: string,
+    dto: ScheduleFixtureDto,
+    actor?: ScheduleActor,
+  ) {
+    const scheduledAt = parseZonedInstant(dto.scheduledAt, 'Scheduled time');
+    const checkInOpensAt = parseZonedInstant(dto.checkInOpensAt, 'Check-in open time');
+    const checkInClosesAt = parseZonedInstant(dto.checkInClosesAt, 'Check-in close time');
+    const playWindowOpensAt = parseZonedInstant(dto.playWindowOpensAt, 'Play-window open time');
+    const playWindowClosesAt = parseZonedInstant(dto.playWindowClosesAt, 'Play-window close time');
+    assertIanaTimezone(dto.timezone);
+    if (!(checkInOpensAt < checkInClosesAt &&
+      checkInClosesAt <= playWindowOpensAt &&
+      playWindowOpensAt <= scheduledAt &&
+      scheduledAt <= playWindowClosesAt)) {
+      throw new BadRequestException('Scheduling windows must follow check-in open → check-in close → play-window open → scheduled time → play-window close');
+    }
+    if (checkInOpensAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Scheduling a fixture with a check-in window in the past is not allowed');
+    }
+
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const season = await tx.season.findUnique({ where: { id: seasonId }, select: { id: true, status: true } });
+      if (!season) throw new NotFoundException('Season not found');
+      if (season.status !== 'ROSTER_LOCKED') {
+        throw new BadRequestException('Fixtures can only be scheduled before the season is activated');
+      }
+
+      const division = await tx.division.findFirst({
+        where: { id: divisionId, season_id: seasonId },
+      });
+      if (!division) throw new NotFoundException('Division not found in this season');
+      if (division.schedule_locked) throw new BadRequestException('The division schedule is locked');
+      if (dto.timezone !== division.match_window_timezone) {
+        throw new BadRequestException(`Fixture timezone must match the division timezone ${division.match_window_timezone}`);
+      }
+
+      const fixture = await tx.fixture.findFirst({
+        where: { id: fixtureId, division_id: divisionId },
+        include: { match: true, match_week: true },
+      });
+      if (!fixture) throw new NotFoundException('Fixture not found in this division');
+      if (!fixture.match || fixture.match.status !== 'SCHEDULED') {
+        throw new BadRequestException('A fixture cannot be scheduled or rescheduled after match execution begins');
+      }
+      if (!fixture.match_week) throw new BadRequestException('Fixture must belong to a configured competition round before scheduling');
+      validateAppointmentWithinDivisionWindow(scheduledAt, dto.timezone, division);
+      if (fixture.match_week.start_date && checkInOpensAt < fixture.match_week.start_date) {
+        throw new BadRequestException('Check-in window opens before the configured round window');
+      }
+      if (fixture.match_week.end_date && playWindowClosesAt > fixture.match_week.end_date) {
+        throw new BadRequestException('Play window closes after the configured round window');
+      }
+      if (
+        fixture.scheduled_at?.getTime() === scheduledAt.getTime() &&
+        fixture.scheduled_timezone === dto.timezone &&
+        fixture.check_in_opens_at?.getTime() === checkInOpensAt.getTime() &&
+        fixture.check_in_closes_at?.getTime() === checkInClosesAt.getTime() &&
+        fixture.play_window_opens_at?.getTime() === playWindowOpensAt.getTime() &&
+        fixture.play_window_closes_at?.getTime() === playWindowClosesAt.getTime()
+      ) {
+        return fixture;
+      }
+
+      const simultaneousFixtures = await tx.fixture.findMany({
+        where: {
+          division_id: divisionId,
+          id: { not: fixtureId },
+          match: { is: { status: { notIn: ['VOID', 'ARCHIVED', 'FORFEITED'] } } },
+          OR: [
+            {
+              check_in_opens_at: { lt: playWindowClosesAt },
+              play_window_closes_at: { gt: checkInOpensAt },
+            },
+            {
+              check_in_opens_at: null,
+              scheduled_at: { gte: checkInOpensAt, lt: playWindowClosesAt },
+            },
+          ],
+        },
+        select: { id: true, home_player_id: true, away_player_id: true },
+      });
+      const conflictingPlayerFixture = simultaneousFixtures.find((other) =>
+        [other.home_player_id, other.away_player_id].some((playerId) =>
+          playerId === fixture.home_player_id || playerId === fixture.away_player_id,
+        ),
+      );
+      if (conflictingPlayerFixture) {
+        throw new BadRequestException('A participant already has a fixture scheduled at this time');
+      }
+      if (simultaneousFixtures.length >= division.concurrent_matches) {
+        throw new BadRequestException(`This time already uses the configured concurrency capacity of ${division.concurrent_matches}`);
+      }
+
+      const updated = await tx.fixture.update({
+        where: { id: fixtureId },
+        data: {
+          scheduled_at: scheduledAt,
+          scheduled_timezone: dto.timezone,
+          check_in_opens_at: checkInOpensAt,
+          check_in_closes_at: checkInClosesAt,
+          play_window_opens_at: playWindowOpensAt,
+          play_window_closes_at: playWindowClosesAt,
+          scheduling_status: fixture.scheduled_at ? 'RESCHEDULED' : 'SCHEDULED',
+        },
+      });
+      await this.outbox.enqueueEvent(tx, {
+        eventName: fixture.scheduled_at ? 'fixture.rescheduled' : 'fixture.scheduled',
+        aggregateType: 'Fixture',
+        aggregateId: fixture.id,
+        actorId: actor?.id,
+        actorRole: actor?.role,
+        correlationId: actor?.correlationId,
+        metadata: {
+          seasonId,
+          divisionId,
+          before: {
+            scheduledAt: fixture.scheduled_at,
+            timezone: fixture.scheduled_timezone,
+            checkInOpensAt: fixture.check_in_opens_at,
+            checkInClosesAt: fixture.check_in_closes_at,
+            playWindowOpensAt: fixture.play_window_opens_at,
+            playWindowClosesAt: fixture.play_window_closes_at,
+          },
+          after: {
+            scheduledAt,
+            timezone: dto.timezone,
+            checkInOpensAt,
+            checkInClosesAt,
+            playWindowOpensAt,
+            playWindowClosesAt,
+          },
+        },
+      });
+      return updated;
+    });
+  }
+
+  async lockDivisionSchedule(seasonId: string, divisionId: string, actor?: ScheduleActor) {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const season = await tx.season.findUnique({ where: { id: seasonId }, select: { id: true, status: true } });
+      if (!season) throw new NotFoundException('Season not found');
+      if (season.status !== 'ROSTER_LOCKED') {
+        throw new BadRequestException('A schedule can only be locked while the season roster is locked');
+      }
+
+      const division = await tx.division.findFirst({ where: { id: divisionId, season_id: seasonId } });
+      if (!division || !division.active) throw new NotFoundException('Active division not found in this season');
+      if (division.schedule_locked) return { seasonId, divisionId, scheduleLocked: true };
+
+      const participants = await tx.divisionParticipant.findMany({
+        where: {
+          season_id: seasonId,
+          division_id: divisionId,
+          status: 'ACTIVE',
+          competition_selected: true,
+          player: { is: eligiblePlayerProfileWhere },
+        },
+        select: { player_id: true, seed: true, registered_at: true },
+      });
+      const competitionCount = resolveCompetitionParticipantCount(division, participants.length);
+      if (competitionCount < 2 || competitionCount > participants.length ||
+        (division.capacity !== null && competitionCount > division.capacity)) {
+        throw new BadRequestException('The selected competition field is invalid and cannot be locked');
+      }
+      if (participants.length !== competitionCount) {
+        throw new BadRequestException(`The schedule requires exactly ${competitionCount} selected competition participants`);
+      }
+
+      const expectedFixtureCount = expectedRoundRobinFixtureCount(competitionCount, division.format);
+      if (expectedFixtureCount > MAX_FIXTURES_PER_GENERATION) {
+        throw new BadRequestException(`The requested schedule exceeds the ${MAX_FIXTURES_PER_GENERATION}-fixture lock-validation limit`);
+      }
+      const selectedParticipants = selectCompetitionParticipants(participants, competitionCount);
+      const selectedIds = selectedParticipants.map(({ player_id }) => player_id);
+      if (participants.some(({ player_id }) => !selectedIds.includes(player_id))) {
+        throw new BadRequestException('Selected participants do not match the deterministic competition field');
+      }
+
+      const expectedPairings = distributeFixtures(
+        buildRoundRobin(selectedIds, division.format),
+        division.matches_per_participant,
+        division.concurrent_matches,
+      );
+      const fixtures: ScheduleFixtureRecord[] = await tx.fixture.findMany({
+        where: { division_id: divisionId },
+        select: {
+          id: true,
+          schedule_key: true,
+          fixture_number: true,
+          scheduling_period_number: true,
+          concurrency_slot: true,
+          scheduled_at: true,
+          scheduled_timezone: true,
+          check_in_opens_at: true,
+          check_in_closes_at: true,
+          play_window_opens_at: true,
+          play_window_closes_at: true,
+          scheduling_status: true,
+          status: true,
+          match_week: { select: { week_number: true } },
+          home_player_id: true,
+          away_player_id: true,
+          match: { select: { id: true, status: true } },
+        },
+      });
+      const validation = validateGeneratedSchedule(
+        expectedPairings,
+        fixtures,
+        selectedIds,
+        division.format,
+        division.matches_per_participant,
+        division.concurrent_matches,
+      );
+      if (!validation.valid) {
+        throw new BadRequestException(`Schedule failed validation and cannot be locked: ${validation.errors.join(' ')}`);
+      }
+      if (fixtures.some(({ scheduled_at }) => !scheduled_at)) {
+        throw new BadRequestException('Every fixture must be scheduled before the schedule can be locked');
+      }
+      if (fixtures.some(({ match }) => !match || match.status !== 'SCHEDULED')) {
+        throw new BadRequestException('A schedule cannot be locked after any fixture match has entered execution');
+      }
+      if (fixtures.some((fixture) =>
+        !fixture.scheduled_timezone ||
+        !fixture.check_in_opens_at ||
+        !fixture.check_in_closes_at ||
+        !fixture.play_window_opens_at ||
+        !fixture.play_window_closes_at
+      )) {
+        throw new BadRequestException('Every fixture must have a timezone, check-in period, and play window before locking');
+      }
+      const conflicts = countScheduleConflicts(fixtures, division.concurrent_matches);
+      if (conflicts > 0) throw new BadRequestException(`Resolve ${conflicts} scheduling conflict(s) before locking the schedule`);
+
+      await tx.division.update({ where: { id: divisionId }, data: { schedule_locked: true } });
+      await this.outbox.enqueueEvent(tx, {
+        eventName: 'division.schedule_locked',
+        aggregateType: 'Division',
+        aggregateId: divisionId,
+        actorId: actor?.id,
+        actorRole: actor?.role,
+        correlationId: actor?.correlationId,
+        metadata: { seasonId, divisionId, fixtureCount: fixtures.length },
+      });
+      return { seasonId, divisionId, scheduleLocked: true, fixtureCount: fixtures.length };
+    });
   }
 
   async getDivisionScheduleStatus(seasonId: string, divisionId: string): Promise<DivisionFixtureStatusDto> {
@@ -358,6 +711,9 @@ export class FixtureService {
       division.concurrent_matches,
     );
     const currentFixtureCount = await this.prisma.fixture.count({ where: { division_id: divisionId } });
+    const scheduledFixtureCount = await this.prisma.fixture.count({
+      where: { division_id: divisionId, scheduled_at: { not: null } },
+    });
     const canLoadFixtures = currentFixtureCount > 0 &&
       currentFixtureCount <= MAX_FIXTURES_PER_GENERATION &&
       expectedFixtureCount <= MAX_FIXTURES_PER_GENERATION &&
@@ -371,10 +727,18 @@ export class FixtureService {
             fixture_number: true,
             scheduling_period_number: true,
             concurrency_slot: true,
+            scheduled_at: true,
+            scheduled_timezone: true,
+            check_in_opens_at: true,
+            check_in_closes_at: true,
+            play_window_opens_at: true,
+            play_window_closes_at: true,
+            scheduling_status: true,
+            status: true,
             match_week: { select: { week_number: true } },
             home_player_id: true,
             away_player_id: true,
-            match: { select: { id: true } },
+            match: { select: { id: true, status: true } },
           },
         })
       : [];
@@ -395,6 +759,13 @@ export class FixtureService {
     if (currentFixtureCount > MAX_FIXTURES_PER_GENERATION) {
       blockers.push(`The existing ${currentFixtureCount}-fixture schedule exceeds the inline validation limit of ${MAX_FIXTURES_PER_GENERATION}.`);
     }
+    const conflictCount = currentFixtureCount === 0
+      ? 0
+      : canLoadFixtures
+        ? countScheduleConflicts(fixtures, division.concurrent_matches)
+        : null;
+    if (conflictCount === null) warnings.push('Scheduling conflicts were not enumerated because this schedule exceeds inline validation limits.');
+    if (conflictCount !== null && conflictCount > 0) warnings.push(`${conflictCount} scheduling conflict(s) need resolution.`);
     const validation = fixtures.length
       ? validateGeneratedSchedule(
           distributedPairings,
@@ -435,8 +806,13 @@ export class FixtureService {
       participantCount: fieldIsEligible ? competitionCount : participants.length,
       expectedFixtureCount,
       currentFixtureCount,
+      scheduledFixtureCount,
+      unscheduledFixtureCount: currentFixtureCount - scheduledFixtureCount,
       roundCount,
       schedulingPeriodCount: roundCount ? Math.ceil(roundCount / division.matches_per_participant) : 0,
+      currentRound: getCurrentRound(fixtures),
+      conflictCount,
+      scheduleLocked: division.schedule_locked,
       generationStatus,
       validation,
       blockers,
@@ -615,6 +991,115 @@ export function validateGeneratedSchedule(
     errors: [...new Set(errors)],
     densityWarnings,
   };
+}
+
+function parseZonedInstant(value: string, label: string) {
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+    throw new BadRequestException(`${label} must include an explicit timezone offset`);
+  }
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) throw new BadRequestException(`${label} is invalid`);
+  return instant;
+}
+
+function assertIanaTimezone(timezone: string) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+  } catch {
+    throw new BadRequestException(`Timezone "${timezone}" is not a valid IANA timezone`);
+  }
+}
+
+function localMinuteOfDay(instant: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value);
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value);
+  return hour * 60 + minute;
+}
+
+function validateAppointmentWithinDivisionWindow(
+  scheduledAt: Date,
+  timezone: string,
+  division: { match_window_start_minutes: number | null; match_window_end_minutes: number | null },
+) {
+  const start = division.match_window_start_minutes;
+  const end = division.match_window_end_minutes;
+  if (start === null && end === null) return;
+  if (start === null || end === null) {
+    throw new BadRequestException('Division match window must have both a start and end time');
+  }
+  const localMinute = localMinuteOfDay(scheduledAt, timezone);
+  if (localMinute < start || localMinute > end) {
+    throw new BadRequestException('Scheduled appointment falls outside the division match window in its configured timezone');
+  }
+}
+
+function fixtureOperationalInterval(fixture: ScheduleFixtureRecord) {
+  if (fixture.check_in_opens_at && fixture.play_window_closes_at) {
+    return { start: fixture.check_in_opens_at, end: fixture.play_window_closes_at };
+  }
+  if (fixture.scheduled_at) {
+    return { start: fixture.scheduled_at, end: new Date(fixture.scheduled_at.getTime() + 1) };
+  }
+  return null;
+}
+
+function countScheduleConflicts(fixtures: ScheduleFixtureRecord[], concurrentMatches: number) {
+  const conflictFixtureIds = new Set<string>();
+  const intervals = fixtures
+    .map((fixture) => ({ fixture, interval: fixtureOperationalInterval(fixture) }))
+    .filter((item): item is { fixture: ScheduleFixtureRecord; interval: { start: Date; end: Date } } => Boolean(item.interval))
+    .sort((a, b) => a.interval.start.getTime() - b.interval.start.getTime());
+
+  const byPlayer = new Map<string, typeof intervals>();
+  for (const item of intervals) {
+    for (const playerId of [item.fixture.home_player_id, item.fixture.away_player_id]) {
+      const playerIntervals = byPlayer.get(playerId) ?? [];
+      playerIntervals.push(item);
+      byPlayer.set(playerId, playerIntervals);
+    }
+  }
+  for (const playerIntervals of byPlayer.values()) {
+    for (let currentIndex = 0; currentIndex < playerIntervals.length; currentIndex += 1) {
+      const current = playerIntervals[currentIndex];
+      for (let otherIndex = currentIndex + 1; otherIndex < playerIntervals.length; otherIndex += 1) {
+        const other = playerIntervals[otherIndex];
+        if (other.interval.start >= current.interval.end) break;
+        conflictFixtureIds.add(current.fixture.id);
+        conflictFixtureIds.add(other.fixture.id);
+      }
+    }
+  }
+
+  const events = intervals.flatMap(({ fixture, interval }) => [
+    { at: interval.start.getTime(), delta: 1, fixtureId: fixture.id },
+    { at: interval.end.getTime(), delta: -1, fixtureId: fixture.id },
+  ]).sort((a, b) => a.at - b.at || a.delta - b.delta);
+  const active = new Set<string>();
+  for (const event of events) {
+    if (event.delta < 0) {
+      active.delete(event.fixtureId);
+      continue;
+    }
+    if (active.size >= concurrentMatches) conflictFixtureIds.add(event.fixtureId);
+    active.add(event.fixtureId);
+  }
+
+  return conflictFixtureIds.size;
+}
+
+function getCurrentRound(fixtures: ScheduleFixtureRecord[]) {
+  const terminalMatchStatuses = new Set(['COMPLETED', 'CANCELLED', 'CONFIRMED', 'ARCHIVED', 'VOID', 'FORFEITED']);
+  const activeRounds = fixtures
+    .filter((fixture) => !fixture.match?.status || !terminalMatchStatuses.has(fixture.match.status))
+    .map((fixture) => fixture.match_week?.week_number)
+    .filter((round): round is number => round !== undefined);
+  return activeRounds.length ? Math.min(...activeRounds) : null;
 }
 
 function isRetryableScheduleConflict(error: unknown) {

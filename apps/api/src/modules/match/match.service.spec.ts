@@ -8,9 +8,10 @@ const createPrismaMock = () => ({
   divisionParticipant: { findMany: vi.fn() },
   clubMember: { findFirst: vi.fn() },
   match: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  matchStatusTransition: { create: vi.fn() },
   fixture: { create: vi.fn(), findFirst: vi.fn() },
   matchParticipant: { createMany: vi.fn() },
-  matchResult: { create: vi.fn(), update: vi.fn() },
+  matchResult: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   $transaction: vi.fn(),
 });
 
@@ -75,7 +76,8 @@ describe('MatchService', () => {
 
   const buildMatch = () => ({
     id: 'match-id',
-    status: 'SCHEDULED',
+    status: 'IN_PROGRESS',
+    division_id: 'division-id',
     fixture: {
       home_player_id: 'home-id',
       away_player_id: 'away-id',
@@ -88,7 +90,8 @@ describe('MatchService', () => {
   it('allows a match participant to submit a result and records the authenticated actor', async () => {
     prismaMock.match.findUnique.mockResolvedValue(buildMatch());
     prismaMock.matchResult.create.mockResolvedValue({ id: 'result-id' });
-    prismaMock.match.update.mockResolvedValue({ id: 'match-id', status: 'SUBMISSION_PENDING' });
+    prismaMock.matchResult.findUnique.mockResolvedValue({ id: 'result-id' });
+    prismaMock.match.update.mockImplementation(async ({ data }: any) => ({ id: 'match-id', ...data }));
     outboxMock.enqueueEvent.mockResolvedValue({});
 
     const dto: SubmitMatchResultDto = {
@@ -104,7 +107,7 @@ describe('MatchService', () => {
 
     expect(result).toEqual({
       result: { id: 'result-id' },
-      match: { id: 'match-id', status: 'SUBMISSION_PENDING' },
+      match: { id: 'match-id', status: 'RESULT_SUBMITTED' },
     });
     expect(prismaMock.matchResult.create).toHaveBeenCalledWith({
       data: {
@@ -127,15 +130,16 @@ describe('MatchService', () => {
   it('allows an operator to submit a result', async () => {
     prismaMock.match.findUnique.mockResolvedValue(buildMatch());
     prismaMock.matchResult.create.mockResolvedValue({ id: 'result-id' });
-    prismaMock.match.update.mockResolvedValue({ id: 'match-id', status: 'SUBMISSION_PENDING' });
+    prismaMock.matchResult.findUnique.mockResolvedValue({ id: 'result-id' });
+    prismaMock.match.update.mockImplementation(async ({ data }: any) => ({ id: 'match-id', ...data }));
     outboxMock.enqueueEvent.mockResolvedValue({});
 
     const result = await matchService.submitMatchResult(
       { matchId: 'match-id', homeScore: 2, awayScore: 1 },
-      { id: 'operator-user-id', roles: ['OPERATOR'] },
+      { id: 'operator-user-id', roles: ['OPERATOR'], operatorProfile: { assigned_division_id: 'division-id' } },
     );
 
-    expect(result.match.status).toBe('SUBMISSION_PENDING');
+    expect(result.match.status).toBe('RESULT_SUBMITTED');
     expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(
       prismaMock,
       expect.objectContaining({ actorId: 'operator-user-id' }),
@@ -146,7 +150,8 @@ describe('MatchService', () => {
     prismaMock.match.findUnique.mockResolvedValue(buildMatch());
     prismaMock.clubMember.findFirst.mockResolvedValue({ id: 'manager-membership-id' });
     prismaMock.matchResult.create.mockResolvedValue({ id: 'result-id' });
-    prismaMock.match.update.mockResolvedValue({ id: 'match-id', status: 'SUBMISSION_PENDING' });
+    prismaMock.matchResult.findUnique.mockResolvedValue({ id: 'result-id' });
+    prismaMock.match.update.mockImplementation(async ({ data }: any) => ({ id: 'match-id', ...data }));
     outboxMock.enqueueEvent.mockResolvedValue({});
 
     const result = await matchService.submitMatchResult(
@@ -154,8 +159,99 @@ describe('MatchService', () => {
       { id: 'manager-user-id', roles: ['CLUB_MANAGER'] },
     );
 
-    expect(result.match.status).toBe('SUBMISSION_PENDING');
+    expect(result.match.status).toBe('RESULT_SUBMITTED');
     expect(prismaMock.clubMember.findFirst).toHaveBeenCalled();
+  });
+
+  it('records a valid transition with actor, timestamp, and outbox event', async () => {
+    const checkInOpensAt = new Date(Date.now() - 60_000);
+    const checkInClosesAt = new Date(Date.now() + 60 * 60_000);
+    prismaMock.match.findUnique.mockResolvedValue({
+      id: 'match-id',
+      division_id: 'division-id',
+      status: 'SCHEDULED',
+      fixture: { check_in_opens_at: checkInOpensAt, check_in_closes_at: checkInClosesAt },
+      result: null,
+    });
+    prismaMock.match.update.mockImplementation(async ({ data }: any) => ({ id: 'match-id', ...data }));
+    outboxMock.enqueueEvent.mockResolvedValue({});
+
+    const result = await matchService.transitionMatch(
+      'match-id',
+      'CHECK_IN_OPEN' as any,
+      { id: 'operator-id', roles: ['OPERATOR'], operatorProfile: { assigned_division_id: 'division-id' } },
+    );
+
+    expect(result.status).toBe('CHECK_IN_OPEN');
+    expect(prismaMock.matchStatusTransition.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        match_id: 'match-id',
+        from_status: 'SCHEDULED',
+        to_status: 'CHECK_IN_OPEN',
+        actor_id: 'operator-id',
+        transitioned_at: expect.any(Date),
+      }),
+    });
+    expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({ eventName: 'match.status.transitioned', actorId: 'operator-id' }),
+    );
+  });
+
+  it('rejects an invalid transition and an Operator outside the match division', async () => {
+    prismaMock.match.findUnique.mockResolvedValue({
+      id: 'match-id',
+      division_id: 'division-id',
+      status: 'SCHEDULED',
+      fixture: {},
+      result: null,
+    });
+
+    await expect(matchService.transitionMatch('match-id', 'IN_PROGRESS' as any, {
+      id: 'hq-id',
+      roles: ['HQ_ADMIN'],
+    })).rejects.toThrow('Invalid match transition from SCHEDULED to IN_PROGRESS');
+    await expect(matchService.transitionMatch('match-id', 'CANCELLED' as any, {
+      id: 'operator-id',
+      roles: ['OPERATOR'],
+      operatorProfile: { assigned_division_id: 'other-division' },
+    }, 'Cancelled by operator')).rejects.toThrow('outside the assigned division');
+
+    expect(prismaMock.match.update).not.toHaveBeenCalled();
+    expect(prismaMock.matchStatusTransition.create).not.toHaveBeenCalled();
+  });
+
+  it('completes a result through the state machine with an actor-attributed transition', async () => {
+    prismaMock.match.findUnique.mockResolvedValue({
+      id: 'match-id',
+      division_id: 'division-id',
+      status: 'RESULT_SUBMITTED',
+      result: { id: 'result-id', confirmed_at: null },
+    });
+    prismaMock.matchResult.update.mockResolvedValue({ id: 'result-id', confirmed_at: new Date() });
+    prismaMock.match.update.mockImplementation(async ({ data }: any) => ({ id: 'match-id', ...data }));
+    outboxMock.enqueueEvent.mockResolvedValue({});
+
+    const result = await matchService.confirmMatchResult('match-id', {
+      id: 'commissioner-id',
+      roles: ['COMMISSIONER'],
+      correlationId: 'request-id',
+    });
+
+    expect(result.match.status).toBe('COMPLETED');
+    expect(prismaMock.matchStatusTransition.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        from_status: 'RESULT_SUBMITTED',
+        to_status: 'COMPLETED',
+        actor_id: 'commissioner-id',
+        correlation_id: 'request-id',
+        transitioned_at: expect.any(Date),
+      }),
+    });
+    expect(outboxMock.enqueueEvent).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({ eventName: 'match.result.confirmed', actorId: 'commissioner-id' }),
+    );
   });
 
   it('rejects an authenticated user who is not a participant or authorized staff member', async () => {

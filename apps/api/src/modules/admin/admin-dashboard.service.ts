@@ -4,8 +4,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 const activeSeasonStatuses = ['REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED', 'ACTIVE', 'PLAYOFFS'] as const;
 const unresolvedDisputeStatuses = ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] as const;
 const pendingPenaltyStatuses = ['PROPOSED', 'UNDER_REVIEW', 'APPROVED'] as const;
-const pendingResultStatuses = ['SUBMISSION_PENDING', 'UNDER_REVIEW'] as const;
-const activeMatchStatuses = ['CHECK_IN_OPEN', 'CHECK_IN_CLOSED', 'IN_PROGRESS'] as const;
+const pendingResultStatuses = ['AWAITING_RESULT', 'RESULT_SUBMITTED', 'SUBMISSION_PENDING', 'UNDER_REVIEW'] as const;
+const activeMatchStatuses = ['CHECK_IN_OPEN', 'CHECK_IN_CLOSED', 'CHECKED_IN', 'IN_PROGRESS'] as const;
 
 @Injectable()
 export class AdminDashboardService {

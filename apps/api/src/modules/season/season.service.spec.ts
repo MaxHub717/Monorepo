@@ -78,6 +78,7 @@ describe('competition format handling', () => {
           format: 'ROUND_ROBIN_DOUBLE',
           capacity: 4,
           competition_participant_count: 4,
+          schedule_locked: true,
         }]),
       },
       divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
@@ -119,6 +120,7 @@ describe('competition format handling', () => {
           format: 'ROUND_ROBIN_DOUBLE',
           capacity: 2000,
           competition_participant_count: 2000,
+          schedule_locked: true,
         }]),
       },
       divisionParticipant: {
@@ -179,6 +181,7 @@ describe('SeasonService competition-field activation readiness', () => {
           format: 'ROUND_ROBIN_SINGLE',
           capacity: 64,
           competition_participant_count: 64,
+          schedule_locked: true,
           participants: eligibleParticipants,
           _count: { fixtures: 2016 },
         }]),

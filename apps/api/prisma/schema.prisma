@@ -146,14 +146,25 @@ enum MatchStatus {
   SCHEDULED
   CHECK_IN_OPEN
   CHECK_IN_CLOSED
+  CHECKED_IN
   IN_PROGRESS
+  AWAITING_RESULT
+  RESULT_SUBMITTED
   SUBMISSION_PENDING
   UNDER_REVIEW
+  COMPLETED
   CONFIRMED
   DISPUTED
+  CANCELLED
   FORFEITED
   VOID
   ARCHIVED
+}
+
+enum FixtureSchedulingStatus {
+  UNSCHEDULED
+  SCHEDULED
+  RESCHEDULED
 }
 
 enum DisputeStatus {
@@ -210,6 +221,7 @@ model User {
   notifications      Notification[]
   audit_logs         AuditLog[]
   outbox_events      OutboxEvent[]
+  match_status_transitions MatchStatusTransition[]
 
   @@map("users")
 }
@@ -530,6 +542,7 @@ model Division {
   match_window_end_minutes Int?
   match_window_timezone String @default("UTC")
   concurrent_matches Int @default(1)
+  schedule_locked Boolean @default(false)
   active      Boolean      @default(true)
   created_at  DateTime     @default(now()) @db.Timestamptz(6)
   updated_at  DateTime     @updatedAt @db.Timestamptz(6)
@@ -595,7 +608,13 @@ model Fixture {
   concurrency_slot Int?
   home_player_id String      @db.Uuid
   away_player_id String      @db.Uuid
-  scheduled_at   DateTime?
+  scheduled_at   DateTime? @db.Timestamptz(6)
+  scheduled_timezone String?
+  check_in_opens_at DateTime? @db.Timestamptz(6)
+  check_in_closes_at DateTime? @db.Timestamptz(6)
+  play_window_opens_at DateTime? @db.Timestamptz(6)
+  play_window_closes_at DateTime? @db.Timestamptz(6)
+  scheduling_status FixtureSchedulingStatus @default(UNSCHEDULED)
   schedule_key   String?
   status         MatchStatus @default(SCHEDULED)
   created_at     DateTime    @default(now()) @db.Timestamptz(6)
@@ -629,11 +648,30 @@ model Match {
   division     Division            @relation(fields: [division_id], references: [id])
   participants MatchParticipant[]
   result       MatchResult?
+  status_transitions MatchStatusTransition[]
   disputes     Dispute[]
   penalties    Penalty[]
 
   @@index([season_id, division_id, status])
   @@map("matches")
+}
+
+model MatchStatusTransition {
+  id             String      @id @default(uuid()) @db.Uuid
+  match_id       String      @db.Uuid
+  from_status    String?
+  to_status      String
+  actor_id       String?     @db.Uuid
+  actor_role     String?
+  reason         String?
+  correlation_id String?
+  transitioned_at DateTime   @default(now()) @db.Timestamptz(6)
+
+  match Match @relation(fields: [match_id], references: [id], onDelete: Restrict)
+  actor User? @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([match_id, transitioned_at])
+  @@map("match_status_transitions")
 }
 
 model MatchParticipant {

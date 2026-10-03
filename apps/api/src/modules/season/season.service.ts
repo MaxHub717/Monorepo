@@ -77,10 +77,10 @@ export class SeasonService {
 
     const [fixtureCount, pendingResultCount, disputeCount, penaltyCount, confirmedMatchCount] = await Promise.all([
       this.prisma.fixture.count({ where: { division: { season_id: seasonId } } }),
-      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['SUBMISSION_PENDING', 'UNDER_REVIEW'] } } }),
+      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['AWAITING_RESULT', 'RESULT_SUBMITTED', 'SUBMISSION_PENDING', 'UNDER_REVIEW'] } } }),
       this.prisma.dispute.count({ where: { match: { season_id: seasonId }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } } }),
       this.prisma.penalty.count({ where: { match: { season_id: seasonId }, status: { in: ['PROPOSED', 'UNDER_REVIEW', 'APPROVED'] } } }),
-      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['CONFIRMED', 'ARCHIVED'] } } }),
+      this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['COMPLETED', 'CONFIRMED', 'ARCHIVED'] } } }),
     ]);
 
     const readiness = await this.getTransitionReadiness(seasonId, season.status, fixtureCount, confirmedMatchCount);
@@ -131,6 +131,7 @@ export class SeasonService {
         format: true,
         capacity: true,
         competition_participant_count: true,
+        schedule_locked: true,
         participants: {
           where: {
             status: 'ACTIVE',
@@ -173,6 +174,9 @@ export class SeasonService {
         if (expected > MAX_FIXTURES_PER_GENERATION) {
           issues.push(`${division.name} requires ${expected} fixtures, above the per-transaction generation limit of ${MAX_FIXTURES_PER_GENERATION}.`);
           continue;
+        }
+        if (!division.schedule_locked) {
+          issues.push(`${division.name} schedule must be locked before the season can be activated.`);
         }
         const selectedCount = division.participants.filter(({ competition_selected }) => competition_selected).length;
         const selectedPlayerIds = division.participants
@@ -339,11 +343,14 @@ export class SeasonService {
 
       const divisions = await tx.division.findMany({
         where: { season_id: seasonId, active: true },
-        select: { id: true, name: true, format: true, capacity: true, competition_participant_count: true },
+        select: { id: true, name: true, format: true, capacity: true, competition_participant_count: true, schedule_locked: true },
       });
       if (!divisions.length) throw new BadRequestException('Season must have at least one active division');
 
       for (const division of divisions) {
+        if (!division.schedule_locked) {
+          throw new BadRequestException(`Division ${division.name} schedule must be locked before activation`);
+        }
         const participants = await tx.divisionParticipant.findMany({
           where: {
             season_id: seasonId,
@@ -403,7 +410,7 @@ export class SeasonService {
     }
 
     if (newStatus === 'PLAYOFFS') {
-      const pending = await tx.match.count({ where: { season_id: seasonId, status: { notIn: ['CONFIRMED', 'ARCHIVED', 'VOID', 'FORFEITED'] } } });
+      const pending = await tx.match.count({ where: { season_id: seasonId, status: { notIn: ['COMPLETED', 'CONFIRMED', 'ARCHIVED', 'VOID', 'FORFEITED', 'CANCELLED'] } } });
       if (pending > 0) throw new BadRequestException('All regular-season matches must be resolved before playoffs can begin');
       const standingsCount = await tx.standingsRow.count({ where: { season_id: seasonId } });
       if (standingsCount < 4) throw new BadRequestException('At least four standings rows are required before playoffs can begin');
