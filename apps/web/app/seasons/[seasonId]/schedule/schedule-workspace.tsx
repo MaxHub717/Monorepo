@@ -5,13 +5,14 @@ import { useState } from 'react';
 import PageShell from '../../../components/page-shell';
 import {
   DivisionFixturePage,
-  DivisionFixtureSchedule,
-  generateDivisionFixtures,
+  generateDivisionSchedule,
   getDivisionFixtures,
   getSeasonFixtureSchedule,
   lockDivisionSchedule,
   SeasonFixtureSchedule,
   updateFixtureSchedule,
+  validateDivisionSchedule,
+  ScheduleValidationResult,
 } from '../../../lib/api-client';
 import styles from './schedule.module.css';
 
@@ -19,10 +20,12 @@ type Props = {
   seasonId: string;
   initialSchedule: SeasonFixtureSchedule;
   initialFixtures: DivisionFixturePage | null;
+  initialLoadError?: string;
+  initialFixturesError?: string;
 };
 
 type AppointmentField = 'scheduledAt' | 'checkInOpensAt' | 'checkInClosesAt' | 'playWindowOpensAt' | 'playWindowClosesAt';
-type AppointmentDraft = Record<AppointmentField, string>;
+type AppointmentDraft = Record<AppointmentField, string> & { timezone: string; reason: string };
 
 function label(value: string) {
   return value.replaceAll('_', ' ');
@@ -77,10 +80,17 @@ function timezoneOffsetAt(instant: Date, timezone: string) {
   return Date.UTC(value('year'), value('month') - 1, value('day'), value('hour'), value('minute'), value('second')) - instant.getTime();
 }
 
-function formatDateTime(value: string | null, timezone?: string | null) {
-  if (!value) return 'Unscheduled';
+function formatDate(value: string | null, timezone?: string | null) {
+  if (!value) return '—';
   return new Intl.DateTimeFormat('en', {
     dateStyle: 'medium',
+    ...(timezone ? { timeZone: timezone } : {}),
+  }).format(new Date(value));
+}
+
+function formatTime(value: string | null, timezone?: string | null) {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('en', {
     timeStyle: 'short',
     ...(timezone ? { timeZone: timezone } : {}),
   }).format(new Date(value));
@@ -93,20 +103,32 @@ function draftFromFixture(fixture: DivisionFixturePage['fixtures'][number], time
     checkInClosesAt: toLocalDateTime(fixture.checkInClosesAt, timezone),
     playWindowOpensAt: toLocalDateTime(fixture.playWindowOpensAt, timezone),
     playWindowClosesAt: toLocalDateTime(fixture.playWindowClosesAt, timezone),
+    timezone,
+    reason: '',
   };
 }
 
-export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFixtures }: Props) {
+export default function ScheduleWorkspace({
+  seasonId,
+  initialSchedule,
+  initialFixtures,
+  initialLoadError,
+  initialFixturesError,
+}: Props) {
   const [schedule, setSchedule] = useState(initialSchedule);
   const [divisionId, setDivisionId] = useState(initialSchedule.divisions[0]?.divisionId ?? '');
   const [fixturePage, setFixturePage] = useState(initialFixtures);
+  const [fixturesLoading, setFixturesLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [appointmentDrafts, setAppointmentDrafts] = useState<Record<string, AppointmentDraft>>({});
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(initialLoadError ?? initialFixturesError ?? null);
+  const [messageIsError, setMessageIsError] = useState(Boolean(initialLoadError || initialFixturesError));
+  const [validationReport, setValidationReport] = useState<ScheduleValidationResult | null>(null);
 
   const division = schedule.divisions.find((item) => item.divisionId === divisionId) ?? null;
   const fixtures = fixturePage?.fixtures ?? [];
+  const currentConflictCount = validationReport?.summary.conflicts ?? division?.conflictCount;
   const canGenerate = Boolean(
     division &&
     schedule.seasonStatus === 'ROSTER_LOCKED' &&
@@ -119,19 +141,31 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
     schedule.seasonStatus === 'ROSTER_LOCKED' &&
     division.active &&
     !division.scheduleLocked &&
+    !division.scheduleValidationRequired &&
     division.generationStatus === 'GENERATED' &&
-    division.validation?.valid &&
+    division.currentFixtureCount === division.expectedFixtureCount &&
+    division.expectedFixtureCount > 0 &&
+    division.scheduledFixtureCount === division.expectedFixtureCount &&
     division.unscheduledFixtureCount === 0 &&
-    division.conflictCount === 0,
+    division.validation?.valid &&
+    currentConflictCount === 0 &&
+    (validationReport === null || validationReport.valid),
   );
+  const scheduleGenerated = Boolean(division && division.scheduledFixtureCount > 0);
+  const scheduleValid = canLock;
 
   async function loadDivision(nextDivisionId: string, nextPage: number) {
     if (!nextDivisionId) {
       setFixturePage(null);
       return;
     }
-    const result = await getDivisionFixtures(seasonId, nextDivisionId, nextPage, 25);
-    setFixturePage(result);
+    setFixturesLoading(true);
+    try {
+      const result = await getDivisionFixtures(seasonId, nextDivisionId, nextPage, 25);
+      setFixturePage(result);
+    } finally {
+      setFixturesLoading(false);
+    }
   }
 
   async function refresh(nextDivisionId = divisionId, nextPage = page) {
@@ -142,17 +176,22 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
     setDivisionId(resolvedDivisionId);
     setPage(nextPage);
     await loadDivision(resolvedDivisionId, nextPage);
+    setMessage(null);
+    setMessageIsError(false);
   }
 
   async function runAction(action: () => Promise<unknown>, successMessage: string) {
     setBusy(true);
     setMessage(null);
+    setMessageIsError(false);
+    setValidationReport(null);
     try {
       await action();
       await refresh();
       setMessage(successMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to update the schedule');
+      setMessageIsError(true);
     } finally {
       setBusy(false);
     }
@@ -161,11 +200,28 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
   async function selectDivision(nextDivisionId: string) {
     setDivisionId(nextDivisionId);
     setPage(1);
+    setFixturePage(null);
     setMessage(null);
+    setMessageIsError(false);
+    setValidationReport(null);
     try {
       await loadDivision(nextDivisionId, 1);
+      setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to load division fixtures');
+      setMessageIsError(true);
+    }
+  }
+
+  async function goToPage(nextPage: number) {
+    setPage(nextPage);
+    setMessage(null);
+    setMessageIsError(false);
+    try {
+      await loadDivision(divisionId, nextPage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to load this page of fixtures');
+      setMessageIsError(true);
     }
   }
 
@@ -173,7 +229,11 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
     return appointmentDrafts[fixture.id] ?? draftFromFixture(fixture, fixture.timezone ?? division?.matchWindowTimezone ?? 'UTC');
   }
 
-  function setAppointmentField(fixture: DivisionFixturePage['fixtures'][number], field: AppointmentField, value: string) {
+  function setAppointmentField(
+    fixture: DivisionFixturePage['fixtures'][number],
+    field: AppointmentField | 'timezone' | 'reason',
+    value: string,
+  ) {
     setAppointmentDrafts((current) => ({
       ...current,
       [fixture.id]: { ...getDraft(fixture), [field]: value },
@@ -191,14 +251,21 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
     ];
     if (values.some((value) => !value)) {
       setMessage('Enter the appointment time, check-in period, and play window before saving.');
+      setMessageIsError(true);
       return;
     }
-    const timezone = division?.matchWindowTimezone ?? 'UTC';
+    const timezone = draft.timezone.trim();
+    if (!timezone) {
+      setMessage('Enter an IANA timezone before saving.');
+      setMessageIsError(true);
+      return;
+    }
     let instants: string[];
     try {
       instants = values.map((value) => zonedDateTimeToIso(value, timezone));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Enter valid times in the division timezone.');
+      setMessageIsError(true);
       return;
     }
     await runAction(
@@ -209,9 +276,50 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
         checkInClosesAt: instants[2],
         playWindowOpensAt: instants[3],
         playWindowClosesAt: instants[4],
+        reason: draft.reason || undefined,
       }),
-      'Fixture schedule saved.',
+      'Fixture adjusted. Validate the whole schedule before it can be locked.',
     );
+    setValidationReport(null);
+  }
+
+  async function validateSchedule() {
+    if (!division) return;
+    setBusy(true);
+    setMessage(null);
+    setMessageIsError(false);
+    try {
+      const result = await validateDivisionSchedule(seasonId, division.divisionId);
+      setValidationReport(result);
+      await refresh();
+      setMessage(result.valid
+        ? 'Whole schedule validated and ready to lock.'
+        : `Schedule validation found ${result.summary.errors} error(s).`);
+      setMessageIsError(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to validate the schedule');
+      setMessageIsError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryLoad() {
+    setBusy(true);
+    setMessage(null);
+    setMessageIsError(false);
+    try {
+      await refresh(divisionId, page);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to reload schedule data');
+      setMessageIsError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reviewSchedule() {
+    document.getElementById('fixture-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   return (
@@ -229,48 +337,102 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
 
         {schedule.divisions.length === 0 ? (
           <section className={styles.emptyState}>
-            <h3>No divisions configured</h3>
-            <p>This season has no divisions to schedule.</p>
+            <h3>{initialLoadError ? 'Schedule data unavailable' : 'No divisions configured'}</h3>
+            <p>{initialLoadError ?? 'This season has no divisions to schedule.'}</p>
+            {initialLoadError && <button type="button" className={styles.rowButton} disabled={busy} onClick={retryLoad}>Retry loading schedule</button>}
           </section>
         ) : (
           <>
             <section className={styles.toolbar}>
               <label className={styles.divisionSelect}>
                 Division
-                <select value={divisionId} onChange={(event) => selectDivision(event.target.value)} disabled={busy}>
+                <select value={divisionId} onChange={(event) => selectDivision(event.currentTarget.value)} disabled={busy}>
                   {schedule.divisions.map((item) => (
                     <option key={item.divisionId} value={item.divisionId}>{item.divisionName}</option>
                   ))}
                 </select>
               </label>
               <div className={styles.actions}>
-                <button
-                  type="button"
-                  className={styles.secondaryButton}
-                  disabled={busy || !canGenerate}
-                  onClick={() => division && runAction(
-                    () => generateDivisionFixtures(seasonId, division.divisionId),
-                    'Fixtures generated.',
-                  )}
-                >
-                  Generate fixtures
-                </button>
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  disabled={busy || !canLock}
-                  onClick={() => division && runAction(
-                    () => lockDivisionSchedule(seasonId, division.divisionId),
-                    'Schedule locked.',
-                  )}
-                >
-                  Lock schedule
-                </button>
+                {!division?.scheduleLocked && !scheduleGenerated && (
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={busy || !canGenerate}
+                    onClick={() => division && runAction(
+                      () => generateDivisionSchedule(seasonId, division.divisionId),
+                      'Schedule generated. Review appointments, then validate the whole schedule.',
+                    )}
+                  >
+                    {busy ? 'Generating schedule…' : 'Generate Schedule'}
+                  </button>
+                )}
+                {!division?.scheduleLocked && scheduleGenerated && (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={reviewSchedule}
+                    >
+                      Review Schedule
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      disabled={busy}
+                      onClick={validateSchedule}
+                    >
+                      {busy ? 'Validating…' : 'Validate Schedule'}
+                    </button>
+                    {scheduleValid && (
+                      <button
+                        type="button"
+                        className={styles.primaryButton}
+                        disabled={busy}
+                        onClick={() => division && runAction(
+                          () => lockDivisionSchedule(seasonId, division.divisionId),
+                          'Schedule locked.',
+                        )}
+                      >
+                        Lock Schedule
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </section>
 
             {division && (
               <>
+                <section className={styles.workflow} aria-label="Schedule workflow status">
+                  <div><span>Fixture Generation</span><strong>{division.generationStatus === 'GENERATED' ? 'Generated' : label(division.generationStatus)}</strong></div>
+                  <div>
+                    <span>Schedule</span>
+                    <strong>
+                      {division.scheduleLocked
+                        ? 'Locked'
+                        : !scheduleGenerated
+                          ? 'Not Generated'
+                          : division.scheduleValidationRequired
+                            ? 'Requires Validation'
+                            : scheduleValid
+                              ? 'Valid'
+                              : 'Generated'}
+                    </strong>
+                  </div>
+                  {scheduleGenerated && (
+                    <>
+                      <div><span>Scheduled</span><strong>{division.scheduledFixtureCount}</strong></div>
+                      <div><span>Unscheduled</span><strong>{division.unscheduledFixtureCount}</strong></div>
+                    </>
+                  )}
+                  {scheduleValid && (
+                    <>
+                      <div><span>Errors</span><strong>{validationReport?.summary.errors ?? 0}</strong></div>
+                      <div><span>Conflicts</span><strong>{currentConflictCount ?? 0}</strong></div>
+                      <div><span>Warnings</span><strong>{validationReport?.summary.warnings ?? division.warnings.length}</strong></div>
+                    </>
+                  )}
+                </section>
                 <section className={styles.summary} aria-label="Schedule summary">
                   <div><span>Format</span><strong>{label(division.format)}</strong></div>
                   <div><span>Participants</span><strong>{division.participantCount}</strong></div>
@@ -278,7 +440,7 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
                   <div><span>Scheduled</span><strong>{division.scheduledFixtureCount}</strong></div>
                   <div><span>Unscheduled</span><strong>{division.unscheduledFixtureCount}</strong></div>
                   <div><span>Current round</span><strong>{division.currentRound ?? '—'}</strong></div>
-                  <div><span>Scheduling status</span><strong>{division.scheduleLocked ? 'Locked' : label(division.generationStatus)}</strong></div>
+                  <div><span>Scheduling status</span><strong>{division.scheduleLocked ? 'Locked' : division.scheduleValidationRequired ? 'Requires validation' : scheduleValid ? 'Valid' : scheduleGenerated ? 'Generated' : 'Not generated'}</strong></div>
                   <div><span>Conflicts</span><strong>{division.conflictCount ?? 'Not checked'}</strong></div>
                 </section>
 
@@ -294,14 +456,40 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
                     <ul>{division.warnings.map((item) => <li key={item}>{item}</li>)}</ul>
                   </section>
                 )}
-                {message && <p className={styles.message} role="status">{message}</p>}
+                {validationReport && (
+                  <section className={validationReport.valid ? styles.noticeWarning : styles.noticeError} aria-label="Latest schedule validation">
+                    <h3>{validationReport.valid ? 'Schedule validated' : 'Schedule validation failed'}</h3>
+                    <p>
+                      {validationReport.summary.scheduled}/{validationReport.summary.fixtures} scheduled ·{' '}
+                      {validationReport.summary.errors} errors ·{' '}
+                      {validationReport.summary.conflicts} conflicts ·{' '}
+                      {validationReport.summary.warnings} warning(s)
+                    </p>
+                    {validationReport.errors.length > 0 && <ul>{validationReport.errors.map((item) => <li key={item}>{item}</li>)}</ul>}
+                    {validationReport.warnings.length > 0 && <ul>{validationReport.warnings.map((item) => <li key={item}>{item}</li>)}</ul>}
+                  </section>
+                )}
+                {message && division && (
+                  <section className={messageIsError ? styles.noticeError : styles.message} role={messageIsError ? 'alert' : 'status'}>
+                    <p>{message}</p>
+                    {messageIsError && <button type="button" className={styles.rowButton} disabled={busy} onClick={retryLoad}>Retry</button>}
+                  </section>
+                )}
 
-                <section className={styles.fixtureSection}>
+                <section className={styles.fixtureSection} id="fixture-list">
                   <header className={styles.sectionHeader}>
                     <div><p className={styles.eyebrow}>Division fixtures</p><h3>{division.divisionName}</h3></div>
                     <span>{fixturePage?.pagination.total ?? 0} fixtures</span>
                   </header>
-                  {fixtures.length === 0 ? (
+                  {fixturesLoading ? (
+                    <div className={styles.emptyState} role="status">Loading fixtures…</div>
+                  ) : fixturePage === null && messageIsError ? (
+                    <div className={styles.emptyState}>
+                      <h3>Fixtures could not be loaded</h3>
+                      <p>{message}</p>
+                      <button type="button" className={styles.rowButton} disabled={busy} onClick={retryLoad}>Retry loading fixtures</button>
+                    </div>
+                  ) : fixtures.length === 0 ? (
                     <div className={styles.emptyState}>
                       <h3>{division.generationStatus === 'NOT_GENERATED' ? 'No fixtures generated' : 'No fixtures to display'}</h3>
                       <p>{division.generationStatus === 'NOT_GENERATED' ? 'Generate the complete selected competition format to begin scheduling.' : 'Resolve the listed blockers before generating this schedule.'}</p>
@@ -310,44 +498,60 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
                     <>
                       <div className={styles.tableWrap}>
                         <table>
-                          <thead><tr><th>Fixture</th><th>Round</th><th>Participants</th><th>Match status</th><th>Appointment</th><th>Action</th></tr></thead>
+                          <thead><tr>
+                            <th>Fixture</th>
+                            <th>Round</th>
+                            <th>Home player</th>
+                            <th>Away player</th>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Timezone</th>
+                            <th>Check-in window</th>
+                            <th>Play window</th>
+                            <th>Scheduling status</th>
+                            <th>Match status</th>
+                            <th>Adjustment</th>
+                          </tr></thead>
                           <tbody>
                             {fixtures.map((fixture) => {
-                              const canSchedule = schedule.seasonStatus === 'ROSTER_LOCKED' &&
+                              const canAdjust = scheduleGenerated && schedule.seasonStatus === 'ROSTER_LOCKED' &&
                                 !division.scheduleLocked && fixture.matchStatus === 'SCHEDULED';
                               const draft = getDraft(fixture);
                               return (
                                 <tr key={fixture.id}>
                                   <td>#{fixture.fixtureNumber ?? '—'}</td>
                                   <td>{fixture.roundNumber ?? '—'}</td>
-                                  <td>{fixture.homePlayer.gamerTag} <span className={styles.versus}>vs</span> {fixture.awayPlayer.gamerTag}</td>
-                                  <td>{label(fixture.schedulingStatus)} · {label(fixture.matchStatus ?? fixture.status)}</td>
+                                  <td>{fixture.homePlayer.gamerTag}</td>
+                                  <td>{fixture.awayPlayer.gamerTag}</td>
+                                  <td>{formatDate(fixture.scheduledAt, fixture.timezone)}</td>
+                                  <td>{formatTime(fixture.scheduledAt, fixture.timezone)}</td>
+                                  <td>{fixture.timezone ?? '—'}</td>
+                                  <td>{fixture.checkInOpensAt
+                                    ? `${formatTime(fixture.checkInOpensAt, fixture.timezone)} – ${formatTime(fixture.checkInClosesAt, fixture.timezone)}`
+                                    : '—'}</td>
+                                  <td>{fixture.playWindowOpensAt
+                                    ? `${formatTime(fixture.playWindowOpensAt, fixture.timezone)} – ${formatTime(fixture.playWindowClosesAt, fixture.timezone)}`
+                                    : '—'}</td>
+                                  <td>{label(fixture.schedulingStatus)}</td>
+                                  <td>{label(fixture.matchStatus ?? fixture.status)}</td>
                                   <td>
-                                    {canSchedule ? (
-                                      <details className={styles.appointmentDetails} open={!fixture.scheduledAt}>
-                                        <summary>{formatDateTime(fixture.scheduledAt, fixture.timezone ?? division.matchWindowTimezone)}</summary>
+                                    {canAdjust && fixture.scheduledAt ? (
+                                      <details className={styles.appointmentDetails}>
+                                        <summary>Adjust</summary>
                                         <div className={styles.appointmentFields}>
-                                          <label>Appointment<input type="datetime-local" value={draft.scheduledAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'scheduledAt', event.target.value)} /></label>
-                                          <label>Check-in opens<input type="datetime-local" value={draft.checkInOpensAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'checkInOpensAt', event.target.value)} /></label>
-                                          <label>Check-in closes<input type="datetime-local" value={draft.checkInClosesAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'checkInClosesAt', event.target.value)} /></label>
-                                          <label>Play window opens<input type="datetime-local" value={draft.playWindowOpensAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'playWindowOpensAt', event.target.value)} /></label>
-                                          <label>Play window closes<input type="datetime-local" value={draft.playWindowClosesAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'playWindowClosesAt', event.target.value)} /></label>
-                                          <span className={styles.timezoneNote}>Timezone: {division.matchWindowTimezone}</span>
+                                          <label>Appointment<input type="datetime-local" value={draft.scheduledAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'scheduledAt', event.currentTarget.value)} /></label>
+                                          <label>Check-in opens<input type="datetime-local" value={draft.checkInOpensAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'checkInOpensAt', event.currentTarget.value)} /></label>
+                                          <label>Check-in closes<input type="datetime-local" value={draft.checkInClosesAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'checkInClosesAt', event.currentTarget.value)} /></label>
+                                          <label>Play window opens<input type="datetime-local" value={draft.playWindowOpensAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'playWindowOpensAt', event.currentTarget.value)} /></label>
+                                          <label>Play window closes<input type="datetime-local" value={draft.playWindowClosesAt} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'playWindowClosesAt', event.currentTarget.value)} /></label>
+                                          <label>Timezone<input type="text" value={draft.timezone} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'timezone', event.currentTarget.value)} /></label>
+                                          <label>Adjustment reason (optional)<input type="text" value={draft.reason} disabled={busy} onChange={(event) => setAppointmentField(fixture, 'reason', event.currentTarget.value)} /></label>
+                                          <button type="button" className={styles.rowButton} disabled={busy} onClick={() => saveSchedule(fixture)}>
+                                            Save adjustment
+                                          </button>
                                         </div>
                                       </details>
-                                    ) : <div className={styles.appointmentReadOnly}>
-                                      <strong>{formatDateTime(fixture.scheduledAt, fixture.timezone)}</strong>
-                                      <span>{fixture.schedulingStatus} · {fixture.timezone ?? 'Timezone not set'}</span>
-                                      {fixture.checkInOpensAt && <span>Check-in: {formatDateTime(fixture.checkInOpensAt, fixture.timezone)} – {formatDateTime(fixture.checkInClosesAt, fixture.timezone)}</span>}
-                                      {fixture.playWindowOpensAt && <span>Play: {formatDateTime(fixture.playWindowOpensAt, fixture.timezone)} – {formatDateTime(fixture.playWindowClosesAt, fixture.timezone)}</span>}
-                                    </div>}
-                                  </td>
-                                  <td>
-                                    {canSchedule ? (
-                                      <button type="button" className={styles.rowButton} disabled={busy} onClick={() => saveSchedule(fixture)}>
-                                        {fixture.scheduledAt ? 'Reschedule' : 'Schedule'}
-                                      </button>
-                                    ) : fixture.scheduledAt ? 'Scheduled' : 'Unscheduled'}
+                                    ) : division.scheduleLocked ? 'Locked' : '—'}
                                   </td>
                                 </tr>
                               );
@@ -358,8 +562,8 @@ export default function ScheduleWorkspace({ seasonId, initialSchedule, initialFi
                       <footer className={styles.pagination}>
                         <span>Page {fixturePage?.pagination.page ?? 1} of {fixturePage?.pagination.totalPages ?? 1}</span>
                         <div>
-                          <button type="button" className={styles.rowButton} disabled={busy || page <= 1} onClick={async () => { const next = page - 1; setPage(next); await loadDivision(divisionId, next); }}>Previous</button>
-                          <button type="button" className={styles.rowButton} disabled={busy || page >= (fixturePage?.pagination.totalPages ?? 1)} onClick={async () => { const next = page + 1; setPage(next); await loadDivision(divisionId, next); }}>Next</button>
+                          <button type="button" className={styles.rowButton} disabled={busy || fixturesLoading || page <= 1} onClick={() => goToPage(page - 1)}>Previous</button>
+                          <button type="button" className={styles.rowButton} disabled={busy || fixturesLoading || page >= (fixturePage?.pagination.totalPages ?? 1)} onClick={() => goToPage(page + 1)}>Next</button>
                         </div>
                       </footer>
                     </>

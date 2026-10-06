@@ -12,6 +12,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { FixtureService } from '../fixture/fixture.service.js';
 import { eligiblePlayerProfileWhere } from '../participation/eligibility.js';
 import {
   expectedRoundRobinFixtureCount,
@@ -26,6 +27,7 @@ export class SeasonService {
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
     private readonly auditService: AuditService,
+    private readonly fixtureService: FixtureService,
   ) {}
 
   private readonly validTransitions: Record<string, string[]> = {
@@ -132,6 +134,7 @@ export class SeasonService {
         capacity: true,
         competition_participant_count: true,
         schedule_locked: true,
+        schedule_validation_required: true,
         participants: {
           where: {
             status: 'ACTIVE',
@@ -177,6 +180,9 @@ export class SeasonService {
         }
         if (!division.schedule_locked) {
           issues.push(`${division.name} schedule must be locked before the season can be activated.`);
+        }
+        if (division.schedule_validation_required) {
+          issues.push(`${division.name} schedule requires validation before the season can be activated.`);
         }
         const selectedCount = division.participants.filter(({ competition_selected }) => competition_selected).length;
         const selectedPlayerIds = division.participants
@@ -343,13 +349,24 @@ export class SeasonService {
 
       const divisions = await tx.division.findMany({
         where: { season_id: seasonId, active: true },
-        select: { id: true, name: true, format: true, capacity: true, competition_participant_count: true, schedule_locked: true },
+        select: {
+          id: true,
+          name: true,
+          format: true,
+          capacity: true,
+          competition_participant_count: true,
+          schedule_locked: true,
+          schedule_validation_required: true,
+        },
       });
       if (!divisions.length) throw new BadRequestException('Season must have at least one active division');
 
       for (const division of divisions) {
         if (!division.schedule_locked) {
           throw new BadRequestException(`Division ${division.name} schedule must be locked before activation`);
+        }
+        if (division.schedule_validation_required) {
+          throw new BadRequestException(`Division ${division.name} schedule requires validation before activation`);
         }
         const participants = await tx.divisionParticipant.findMany({
           where: {
@@ -405,6 +422,18 @@ export class SeasonService {
         const fixtureCount = await tx.fixture.count({ where: { division_id: division.id } });
         if (fixtureCount !== expectedFixtures) {
           throw new BadRequestException(`Division ${division.name} must have a complete generated fixture schedule before activation`);
+        }
+        const validation = await this.fixtureService.validateDivisionSchedule(
+          seasonId,
+          division.id,
+          actor,
+          tx,
+        );
+        if (!validation.valid || validation.summary.scheduled !== expectedFixtures) {
+          const reasons = validation.errors.length ? `: ${validation.errors.join(' ')}` : '.';
+          throw new BadRequestException(
+            `Division ${division.name} schedule is not valid and cannot be activated${reasons}`,
+          );
         }
       }
     }
@@ -477,7 +506,10 @@ export class SeasonService {
   }
 
   async activateSeason(seasonId: string, actor?: { id?: string; role?: string; correlationId?: string }) {
-    return this.prisma.$transaction((tx) => this.changeStatus(tx, seasonId, 'ACTIVE', actor));
+    return this.prisma.$transaction(
+      (tx) => this.changeStatus(tx, seasonId, 'ACTIVE', actor),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async startPlayoffs(seasonId: string, actor?: { id?: string; role?: string; correlationId?: string }) {

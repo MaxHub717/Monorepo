@@ -169,7 +169,8 @@ export async function apiFetch<T>(
     !payload ||
     typeof payload !== 'object' ||
     !('success' in payload) ||
-    payload.success !== true
+    payload.success !== true ||
+    !('data' in payload)
   ) {
     throw new Error('Invalid API response');
   }
@@ -392,6 +393,7 @@ export type DivisionFixtureSchedule = {
   currentRound: number | null;
   conflictCount: number | null;
   scheduleLocked: boolean;
+  scheduleValidationRequired: boolean;
   generationStatus: 'BLOCKED' | 'NOT_GENERATED' | 'GENERATED' | 'INCOMPLETE';
   validation: {
     valid: boolean;
@@ -701,6 +703,24 @@ export async function generateDivisionFixtures(seasonId: string, divisionId: str
   return apiFetch<unknown>(`/fixtures/seasons/${seasonId}/divisions/${divisionId}/generate`, { method: 'POST' });
 }
 
+export type ScheduleGenerationSummary = {
+  fixtureCount: number;
+  scheduledCount: number;
+  unscheduledCount: number;
+  schedulingStatus: string;
+  warnings: string[];
+};
+
+export async function generateDivisionSchedule(
+  seasonId: string,
+  divisionId: string,
+): Promise<ScheduleGenerationSummary> {
+  return apiFetch<ScheduleGenerationSummary>(
+    `/fixtures/seasons/${seasonId}/divisions/${divisionId}/schedule/generate`,
+    { method: 'POST' },
+  );
+}
+
 export async function getDivisionFixtures(
   seasonId: string,
   divisionId: string,
@@ -724,11 +744,33 @@ export async function updateFixtureSchedule(
     checkInClosesAt: string;
     playWindowOpensAt: string;
     playWindowClosesAt: string;
+    reason?: string;
   },
 ) {
   return apiFetch<unknown>(
     `/fixtures/seasons/${seasonId}/divisions/${divisionId}/fixtures/${fixtureId}/schedule`,
     { method: 'PATCH', body: JSON.stringify(appointment) },
+  );
+}
+
+export type ScheduleValidationResult = {
+  valid: boolean;
+  requiresValidation: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: {
+    fixtures: number;
+    scheduled: number;
+    errors: number;
+    warnings: number;
+    conflicts: number;
+  };
+};
+
+export async function validateDivisionSchedule(seasonId: string, divisionId: string) {
+  return apiFetch<ScheduleValidationResult>(
+    `/fixtures/seasons/${seasonId}/divisions/${divisionId}/schedule/validate`,
+    { method: 'POST' },
   );
 }
 

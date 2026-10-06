@@ -1,4 +1,15 @@
-import { IsDateString, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsDateString,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export type FixtureGenerationState =
   | 'BLOCKED'
@@ -17,6 +28,20 @@ export interface FixtureScheduleValidationDto {
   schedulingPeriodsRequired: number;
   errors: string[];
   densityWarnings: string[];
+}
+
+export interface WholeScheduleValidationDto {
+  valid: boolean;
+  requiresValidation: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: {
+    fixtures: number;
+    scheduled: number;
+    errors: number;
+    warnings: number;
+    conflicts: number;
+  };
 }
 
 export interface DivisionFixtureStatusDto {
@@ -44,6 +69,7 @@ export interface DivisionFixtureStatusDto {
   currentRound: number | null;
   conflictCount: number | null;
   scheduleLocked: boolean;
+  scheduleValidationRequired: boolean;
   generationStatus: FixtureGenerationState;
   validation: FixtureScheduleValidationDto | null;
   blockers: string[];
@@ -57,14 +83,15 @@ export interface SeasonFixtureStatusDto {
   seasonStatus: string;
   divisions: DivisionFixtureStatusDto[];
 }
-
 export class FixturePageQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page = 1;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -80,6 +107,11 @@ export class ScheduleFixtureDto {
   @IsNotEmpty()
   @MaxLength(64)
   timezone!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 
   @IsDateString()
   @Matches(/(?:Z|[+-]\d{2}:\d{2})$/i, { message: 'checkInOpensAt must include an explicit timezone offset' })

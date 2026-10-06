@@ -129,6 +129,35 @@
   background: #dce6df;
 }
 
+.workflow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #b9d4c1;
+  border-radius: 6px;
+  background: #b9d4c1;
+}
+
+.workflow > div {
+  display: grid;
+  min-height: 72px;
+  align-content: center;
+  gap: 7px;
+  padding: 12px 14px;
+  background: #f2f8f3;
+}
+
+.workflow span {
+  color: #52675a;
+  font-size: 0.72rem;
+}
+
+.workflow strong {
+  color: #17633d;
+  font-size: 0.92rem;
+}
+
 .summary div {
   display: grid;
   min-height: 76px;
@@ -187,6 +216,11 @@
   background: #e4f0e6;
 }
 
+.message p,
+.noticeError p {
+  margin: 0 0 8px;
+}
+
 .fixtureSection {
   overflow: hidden;
 }
@@ -226,6 +260,7 @@
 }
 
 .tableWrap table {
+  min-width: 1280px;
   width: 100%;
   border-collapse: collapse;
   text-align: left;

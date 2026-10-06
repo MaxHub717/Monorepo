@@ -20,6 +20,7 @@ describe('competition format handling', () => {
       { $transaction: (callback: any) => callback(tx) } as any,
       outbox as any,
       {} as any,
+      {} as any,
     );
 
     await service.createSeason({
@@ -51,6 +52,7 @@ describe('competition format handling', () => {
       { $transaction: (callback: any) => callback(tx) } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(service.updateDivision('division-id', { format: 'ROUND_ROBIN_DOUBLE' })).rejects.toThrow(
@@ -79,21 +81,148 @@ describe('competition format handling', () => {
           capacity: 4,
           competition_participant_count: 4,
           schedule_locked: true,
+          schedule_validation_required: false,
         }]),
       },
       divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
       fixture: { count: vi.fn(({ where }: any) => where.OR ? 0 : 12) },
     };
+    const fixtureService = {
+      validateDivisionSchedule: vi.fn().mockResolvedValue({
+        valid: true,
+        summary: { fixtures: 12, scheduled: 12, errors: 0, warnings: 0, conflicts: 0 },
+      }),
+    };
     const service = new SeasonService(
       { $transaction: (callback: any) => callback(tx) } as any,
       { enqueueEvent: vi.fn() } as any,
       { writeLog: vi.fn() } as any,
+      fixtureService as any,
     );
 
     const result = await service.activateSeason('season-id');
 
     expect(result.status).toBe('ACTIVE');
     expect(tx.fixture.count).toHaveBeenCalledWith({ where: { division_id: 'division-id' } });
+    expect(fixtureService.validateDivisionSchedule).toHaveBeenCalledWith(
+      'season-id',
+      'division-id',
+      undefined,
+      tx,
+    );
+  });
+
+  it('rejects activation when a schedule has not been locked', async () => {
+    const tx: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'division-id',
+          name: 'Division 1',
+          format: 'ROUND_ROBIN_SINGLE',
+          capacity: 2,
+          competition_participant_count: 2,
+          schedule_locked: false,
+          schedule_validation_required: false,
+        }]),
+      },
+      seasonUpdate: vi.fn(),
+    };
+    tx.season.update = tx.seasonUpdate;
+    const fixtureService = { validateDivisionSchedule: vi.fn() };
+    const service = new SeasonService(
+      { $transaction: (callback: any) => callback(tx) } as any,
+      {} as any,
+      {} as any,
+      fixtureService as any,
+    );
+
+    await expect(service.activateSeason('season-id')).rejects.toThrow(
+      'Division 1 schedule must be locked before activation',
+    );
+    expect(fixtureService.validateDivisionSchedule).not.toHaveBeenCalled();
+    expect(tx.season.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects activation when a locked schedule still requires validation', async () => {
+    const tx: any = {
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      division: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'division-id',
+          name: 'Division 1',
+          schedule_locked: true,
+          schedule_validation_required: true,
+        }]),
+      },
+      seasonUpdate: vi.fn(),
+    };
+    tx.season.update = tx.seasonUpdate;
+    const fixtureService = { validateDivisionSchedule: vi.fn() };
+    const service = new SeasonService(
+      { $transaction: (callback: any) => callback(tx) } as any,
+      {} as any,
+      {} as any,
+      fixtureService as any,
+    );
+
+    await expect(service.activateSeason('season-id')).rejects.toThrow(
+      'Division 1 schedule requires validation before activation',
+    );
+    expect(fixtureService.validateDivisionSchedule).not.toHaveBeenCalled();
+    expect(tx.season.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects activation if a locked schedule fails current whole-schedule validation', async () => {
+    const participants = ['player-a', 'player-b'].map((player_id, index) => ({
+      player_id,
+      seed: index + 1,
+      registered_at: new Date(`2026-01-0${index + 1}T00:00:00Z`),
+      competition_selected: true,
+    }));
+    const tx: any = {
+      season: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }),
+        update: vi.fn(),
+      },
+      division: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: 'division-id',
+          name: 'Division 1',
+          format: 'ROUND_ROBIN_SINGLE',
+          capacity: 2,
+          competition_participant_count: 2,
+          schedule_locked: true,
+          schedule_validation_required: false,
+        }]),
+      },
+      divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
+      fixture: { count: vi.fn(({ where }: any) => where.OR ? 0 : 1) },
+    };
+    const fixtureService = {
+      validateDivisionSchedule: vi.fn().mockResolvedValue({
+        valid: false,
+        errors: ['Fixture appointment is missing its play window.'],
+        summary: { fixtures: 1, scheduled: 0, errors: 1, warnings: 0, conflicts: 0 },
+      }),
+    };
+    const service = new SeasonService(
+      { $transaction: (callback: any) => callback(tx) } as any,
+      {} as any,
+      {} as any,
+      fixtureService as any,
+    );
+
+    await expect(service.activateSeason('season-id')).rejects.toThrow(
+      'Division 1 schedule is not valid and cannot be activated: Fixture appointment is missing its play window.',
+    );
+    expect(fixtureService.validateDivisionSchedule).toHaveBeenCalledWith(
+      'season-id',
+      'division-id',
+      undefined,
+      tx,
+    );
+    expect(tx.season.update).not.toHaveBeenCalled();
   });
 
   it('blocks activation of a field above the safe fixture-generation workload', async () => {
@@ -133,6 +262,7 @@ describe('competition format handling', () => {
 
     const service = new SeasonService(
       { $transaction: (callback: any) => callback(tx) } as any,
+      {} as any,
       {} as any,
       {} as any,
     );
@@ -198,6 +328,7 @@ describe('SeasonService competition-field activation readiness', () => {
       prisma,
       { enqueueEvent: vi.fn() } as any,
       { writeLog: vi.fn() } as any,
+      { validateDivisionSchedule: vi.fn() } as any,
     );
   });
 

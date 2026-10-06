@@ -44,6 +44,34 @@ export class FixtureController {
     });
   }
 
+  @Post('seasons/:seasonId/divisions/:divisionId/schedule/generate')
+  @UseGuards(OperatorScopeGuard)
+  @RequirePermission(PermissionName.MANAGE_MATCHES)
+  @RequireOperatorScope('divisionId')
+  generateAppointments(
+    @Param('seasonId') seasonId: string,
+    @Param('divisionId') divisionId: string,
+    @Req() req: any,
+  ) {
+    return this.fixtureService.generateDivisionScheduleAppointments(
+      seasonId,
+      divisionId,
+      this.actor(req),
+    );
+  }
+
+  @Post('seasons/:seasonId/divisions/:divisionId/schedule/validate')
+  @UseGuards(OperatorScopeGuard)
+  @RequirePermission(PermissionName.MANAGE_MATCHES)
+  @RequireOperatorScope('divisionId')
+  validateSchedule(
+    @Param('seasonId') seasonId: string,
+    @Param('divisionId') divisionId: string,
+    @Req() req: any,
+  ) {
+    return this.fixtureService.validateDivisionSchedule(seasonId, divisionId, this.actor(req));
+  }
+
   @Patch('seasons/:seasonId/divisions/:divisionId/fixtures/:fixtureId/schedule')
   @UseGuards(OperatorScopeGuard)
   @RequirePermission(PermissionName.MANAGE_MATCHES)
