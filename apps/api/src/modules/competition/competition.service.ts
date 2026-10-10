@@ -1670,6 +1670,31 @@ export class CompetitionService {
       const participantIds = jsonStringArray(phase.participating_player_ids).length > 0
         ? jsonStringArray(phase.participating_player_ids)
         : phase.plots.flatMap((plot) => jsonStringArray(plot.player_ids));
+      const validatedSeries = series.map((entry) => {
+        const games = entry.games.map((game) => {
+          const homePlayerId = game.home_player_id?.trim();
+          const awayPlayerId = game.away_player_id?.trim();
+          if (!homePlayerId || !awayPlayerId || homePlayerId === awayPlayerId) {
+            throw new BadRequestException(
+              `Series ${entry.id} Game ${game.game_number} must have two distinct valid participant IDs before Phase transition.`,
+            );
+          }
+          return {
+            gameNumber: game.game_number,
+            homePlayerId,
+            awayPlayerId,
+            status: game.status,
+            result: game.result,
+            winnerPlayerId: game.winner_player_id,
+          };
+        });
+        return {
+          id: entry.id,
+          status: entry.status as 'COMPLETED' | 'ELIMINATED',
+          games,
+          advancement: resolveSeriesAdvancement({ seriesId: entry.id, games }),
+        };
+      });
 
       const transition = planPhaseTransition({
         seasonId: phase.season_id,
@@ -1687,29 +1712,7 @@ export class CompetitionService {
           plotCount: phase.plots.length,
           previousPlots: phase.plots.map((plot) => ({ playerIds: jsonStringArray(plot.player_ids) })),
         },
-        series: series.map((entry) => ({
-          id: entry.id,
-          status: entry.status as 'COMPLETED' | 'ELIMINATED',
-          games: entry.games.map((game) => ({
-            gameNumber: game.game_number,
-            homePlayerId: game.home_player_id,
-            awayPlayerId: game.away_player_id,
-            status: game.status,
-            result: game.result,
-            winnerPlayerId: game.winner_player_id,
-          })),
-          advancement: resolveSeriesAdvancement({
-            seriesId: entry.id,
-            games: entry.games.map((game) => ({
-              gameNumber: game.game_number,
-              homePlayerId: game.home_player_id,
-              awayPlayerId: game.away_player_id,
-              status: game.status,
-              result: game.result,
-              winnerPlayerId: game.winner_player_id,
-            })),
-          }),
-        })),
+        series: validatedSeries,
       });
 
       const nextPhase = await tx.phase.create({

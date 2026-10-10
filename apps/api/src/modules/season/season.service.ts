@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   Prisma,
   DivisionType,
@@ -12,9 +12,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { FixtureService } from '../fixture/fixture.service.js';
 import { createCompetitionNotifications } from '../notification/notification.service.js';
 import { eligiblePlayerProfileWhere } from '../participation/eligibility.js';
 import {
+  expectedRoundRobinFixtureCount,
+  MAX_FIXTURES_PER_GENERATION,
   resolveCompetitionParticipantCount,
   selectCompetitionParticipants,
 } from './competition-field.js';
@@ -71,6 +74,7 @@ export class SeasonService {
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
     private readonly auditService: AuditService,
+    @Optional() private readonly fixtureService?: FixtureService,
   ) {}
 
   private readonly validTransitions: Record<string, string[]> = {
@@ -190,8 +194,13 @@ export class SeasonService {
         name: true,
         participants: {
           where: { status: 'ACTIVE', player: { is: eligiblePlayerProfileWhere } },
-          select: { player_id: true },
+          select: { player_id: true, seed: true, registered_at: true, competition_selected: true },
         },
+        format: true,
+        capacity: true,
+        competition_participant_count: true,
+        schedule_locked: true,
+        schedule_validation_required: true,
       },
     });
     const issues: string[] = [];
@@ -207,7 +216,7 @@ export class SeasonService {
       }
     }
     if (status === 'ROSTER_LOCKED') {
-      const readiness = await this.getCanonicalScheduleReadiness(seasonId, this.prisma);
+      const readiness = await this.getCanonicalScheduleReadiness(seasonId, this.prisma, divisions);
       issues.push(...readiness.issues);
     }
     if (status === 'ACTIVE') {
@@ -233,14 +242,87 @@ export class SeasonService {
     return { canAdvance: issues.length === 0, issues };
   }
 
-  private async getCanonicalScheduleReadiness(seasonId: string, client: any) {
+  private getCompetitionFieldIssues(divisions: any[]) {
+    const issues: string[] = [];
+    for (const division of divisions) {
+      const participants = division.participants ?? [];
+      const competitionCount = resolveCompetitionParticipantCount(division, participants.length);
+      if (competitionCount < 2) {
+        issues.push(`${division.name} needs at least two eligible participants.`);
+        continue;
+      }
+      if (competitionCount > participants.length) {
+        issues.push(`${division.name} needs ${competitionCount} eligible participants for its configured competition field; found ${participants.length}.`);
+        continue;
+      }
+      if (division.capacity !== null && division.capacity !== undefined && competitionCount > division.capacity) {
+        issues.push(`${division.name} competition field exceeds its configured capacity.`);
+      }
+      const fixtureCount = expectedRoundRobinFixtureCount(competitionCount, division.format);
+      if (fixtureCount > MAX_FIXTURES_PER_GENERATION) {
+        issues.push(`${division.name} competition field requires ${fixtureCount} fixtures, above the per-transaction generation limit of ${MAX_FIXTURES_PER_GENERATION}.`);
+      }
+      const expectedSelection = selectCompetitionParticipants(participants, competitionCount).map((participant: any) => participant.player_id);
+      const actualSelection = participants.filter((participant: any) => participant.competition_selected).map((participant: any) => participant.player_id);
+      const actualSelectionSet = new Set(actualSelection);
+      if (actualSelection.length > 0 && (
+        actualSelectionSet.size !== expectedSelection.length
+        || expectedSelection.some((playerId: string) => !actualSelectionSet.has(playerId))
+      )) {
+        issues.push(`${division.name} selected participants do not match the deterministic competition field.`);
+      }
+    }
+    return issues;
+  }
+
+  private async getLegacyFixtureScheduleReadiness(seasonId: string, client: any, divisions: any[]) {
+    const issues = this.getCompetitionFieldIssues(divisions);
+    if (!divisions.length) issues.push('At least one active division is required for fixture scheduling.');
+    if (issues.length > 0) return { canAdvance: false, issues };
+    for (const division of divisions) {
+      if (!division.schedule_locked) {
+        issues.push(`${division.name} schedule must be locked before activation.`);
+        continue;
+      }
+      if (division.schedule_validation_required) {
+        issues.push(`${division.name} schedule requires validation before activation.`);
+        continue;
+      }
+      const validation = typeof this.fixtureService?.validateDivisionSchedule === 'function'
+        ? await this.fixtureService.validateDivisionSchedule(seasonId, division.id, undefined, client)
+        : undefined;
+      if (validation && !validation.valid) {
+        issues.push(`${division.name} schedule is not valid and cannot be activated: ${validation.errors.join(' ')}`);
+      }
+    }
+    return { canAdvance: issues.length === 0, issues };
+  }
+
+  private async getCanonicalScheduleReadiness(seasonId: string, client: any, readinessDivisions?: any[]) {
     const season = await client.season.findUnique({ where: { id: seasonId } });
     const phases = await client.phase.findMany({
       where: { season_id: seasonId },
       orderBy: { phase_number: 'asc' },
       include: { plots: { include: { series: { include: { games: true } } } } },
     });
-    const issues: string[] = [];
+    const divisions = readinessDivisions ?? await client.division.findMany({
+      where: { season_id: seasonId, active: true },
+      include: { participants: { where: { status: 'ACTIVE', player: { is: eligiblePlayerProfileWhere } } } },
+    });
+    const issues: string[] = this.getCompetitionFieldIssues(divisions);
+    if (issues.length > 0) return { canAdvance: false, issues };
+    if (!phases.length) {
+      const [fixtureCount, legacyDivisions] = await Promise.all([
+        client.fixture.count({ where: { division: { season_id: seasonId } } }),
+        client.division.findMany({
+          where: { season_id: seasonId, active: true },
+          select: { id: true, name: true, schedule_locked: true, schedule_validation_required: true },
+        }),
+      ]);
+      if (fixtureCount > 0 || legacyDivisions.some((division: any) => division.schedule_locked)) {
+        return this.getLegacyFixtureScheduleReadiness(seasonId, client, divisions);
+      }
+    }
     if (!season?.start_date || !season.end_date) issues.push('Season start and end dates are required before scheduling.');
     if (!phases.length) issues.push('Generate the canonical Phase structure before activating this Season.');
     if (phases.some((phase: any) => !phase.schedule_locked)) {

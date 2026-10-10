@@ -92,6 +92,7 @@ describe('competition format handling', () => {
         findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }),
         update: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ACTIVE' }),
       },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
           id: 'division-id',
@@ -101,6 +102,7 @@ describe('competition format handling', () => {
           competition_participant_count: 4,
           schedule_locked: true,
           schedule_validation_required: false,
+          participants,
         }]),
       },
       divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
@@ -122,7 +124,7 @@ describe('competition format handling', () => {
     const result = await service.activateSeason('season-id');
 
     expect(result.status).toBe('ACTIVE');
-    expect(tx.fixture.count).toHaveBeenCalledWith({ where: { division_id: 'division-id' } });
+    expect(tx.fixture.count).toHaveBeenCalledWith({ where: { division: { season_id: 'season-id' } } });
     expect(fixtureService.validateDivisionSchedule).toHaveBeenCalledWith(
       'season-id',
       'division-id',
@@ -134,6 +136,7 @@ describe('competition format handling', () => {
   it('rejects activation when a schedule has not been locked', async () => {
     const tx: any = {
       season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
           id: 'division-id',
@@ -143,8 +146,12 @@ describe('competition format handling', () => {
           competition_participant_count: 2,
           schedule_locked: false,
           schedule_validation_required: false,
+          participants: ['player-a', 'player-b'].map((player_id, index) => ({
+            player_id, seed: index + 1, registered_at: new Date(`2026-01-0${index + 1}T00:00:00Z`), competition_selected: true,
+          })),
         }]),
       },
+      fixture: { count: vi.fn().mockResolvedValue(1) },
       seasonUpdate: vi.fn(),
     };
     tx.season.update = tx.seasonUpdate;
@@ -166,14 +173,22 @@ describe('competition format handling', () => {
   it('rejects activation when a locked schedule still requires validation', async () => {
     const tx: any = {
       season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
           id: 'division-id',
           name: 'Division 1',
+          format: 'ROUND_ROBIN_SINGLE',
+          capacity: 2,
+          competition_participant_count: 2,
           schedule_locked: true,
           schedule_validation_required: true,
+          participants: ['player-a', 'player-b'].map((player_id, index) => ({
+            player_id, seed: index + 1, registered_at: new Date(`2026-01-0${index + 1}T00:00:00Z`), competition_selected: true,
+          })),
         }]),
       },
+      fixture: { count: vi.fn().mockResolvedValue(1) },
       seasonUpdate: vi.fn(),
     };
     tx.season.update = tx.seasonUpdate;
@@ -204,6 +219,7 @@ describe('competition format handling', () => {
         findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }),
         update: vi.fn(),
       },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
           id: 'division-id',
@@ -213,6 +229,7 @@ describe('competition format handling', () => {
           competition_participant_count: 2,
           schedule_locked: true,
           schedule_validation_required: false,
+          participants,
         }]),
       },
       divisionParticipant: { findMany: vi.fn().mockResolvedValue(participants) },
@@ -261,6 +278,7 @@ describe('competition format handling', () => {
           status: 'ROSTER_LOCKED',
         }),
       },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
           id: 'division-id',
@@ -269,6 +287,7 @@ describe('competition format handling', () => {
           capacity: 2000,
           competition_participant_count: 2000,
           schedule_locked: true,
+          participants,
         }]),
       },
       divisionParticipant: {
@@ -316,6 +335,7 @@ describe('SeasonService competition-field activation readiness', () => {
           status: 'ROSTER_LOCKED',
           start_date: new Date('2026-01-01T00:00:00Z'),
           end_date: new Date('2026-12-31T00:00:00Z'),
+          competition_timezone: 'UTC',
           registration_open_at: null,
           registration_close_at: null,
           league: { id: 'league-id', name: 'NGL Professional', status: 'ACTIVE' },
@@ -338,6 +358,7 @@ describe('SeasonService competition-field activation readiness', () => {
       fixture: {
         count: vi.fn(({ where }: any) => where.OR ? 0 : 2016),
       },
+      phase: { findMany: vi.fn().mockResolvedValue([]) },
       match: { count: vi.fn().mockResolvedValue(0) },
       dispute: { count: vi.fn().mockResolvedValue(0) },
       penalty: { count: vi.fn().mockResolvedValue(0) },
@@ -455,4 +476,85 @@ describe('SeasonService competition-field activation readiness', () => {
       ),
     ).toBe(true);
   });
+
+  it('blocks canonical readiness when Phases are missing and the season has no legacy fixture schedule', async () => {
+    prisma.fixture.count.mockReturnValue(0);
+    prisma.division.findMany.mockResolvedValue([{
+      id: 'division-id', name: 'Division 1', format: 'ROUND_ROBIN_SINGLE', capacity: 64,
+      competition_participant_count: 64, schedule_locked: false, schedule_validation_required: true,
+      participants: eligibleParticipants,
+    }]);
+
+    const overview = await service.getOverview('season-id');
+
+    expect(overview.readiness.canAdvance).toBe(false);
+    expect(overview.readiness.issues).toContain('Generate the canonical Phase structure before activating this Season.');
+  });
+
+  it('blocks an unlocked canonical Phase schedule', async () => {
+    prisma.fixture.count.mockReturnValue(0);
+    prisma.division.findMany.mockResolvedValue([{
+      id: 'division-id', name: 'Division 1', format: 'ROUND_ROBIN_SINGLE', capacity: 64,
+      competition_participant_count: 64, schedule_locked: false, participants: eligibleParticipants,
+    }]);
+    prisma.phase.findMany.mockResolvedValue([canonicalPhase(false)]);
+
+    const overview = await service.getOverview('season-id');
+
+    expect(overview.readiness.canAdvance).toBe(false);
+    expect(overview.readiness.issues).toContain('Every Phase schedule must be validated and locked before Season activation.');
+  });
+
+  it('blocks a locked canonical Phase with invalid appointments', async () => {
+    prisma.fixture.count.mockReturnValue(0);
+    prisma.division.findMany.mockResolvedValue([{
+      id: 'division-id', name: 'Division 1', format: 'ROUND_ROBIN_SINGLE', capacity: 64,
+      competition_participant_count: 64, schedule_locked: false, participants: eligibleParticipants,
+    }]);
+    prisma.phase.findMany.mockResolvedValue([canonicalPhase(true, false)]);
+
+    const overview = await service.getOverview('season-id');
+
+    expect(overview.readiness.canAdvance).toBe(false);
+    expect(overview.readiness.issues.some((issue: string) => issue.includes('series-id'))).toBe(true);
+  });
+
+  it('accepts a valid locked canonical Phase schedule', async () => {
+    prisma.fixture.count.mockReturnValue(0);
+    prisma.division.findMany.mockResolvedValue([{
+      id: 'division-id', name: 'Division 1', format: 'ROUND_ROBIN_SINGLE', capacity: 64,
+      competition_participant_count: 64, schedule_locked: false, participants: eligibleParticipants,
+    }]);
+    prisma.phase.findMany.mockResolvedValue([canonicalPhase(true, true)]);
+
+    const overview = await service.getOverview('season-id');
+
+    expect(overview.readiness).toEqual({ canAdvance: true, issues: [] });
+  });
 });
+
+function canonicalPhase(schedule_locked: boolean, includeAppointment = true) {
+  return {
+    id: 'phase-id',
+    phase_number: 1,
+    start_at: new Date('2026-01-01T00:00:00Z'),
+    end_at: new Date('2026-12-31T00:00:00Z'),
+    schedule_locked,
+    plots: [{
+      id: 'plot-id',
+      player_ids: ['player-1', 'player-2'],
+      series: [{
+        id: 'series-id',
+        participant_player_ids: ['player-1', 'player-2'],
+        schedule_key: 'series-id:schedule',
+        check_in_opens_at: includeAppointment ? new Date('2026-01-05T09:00:00Z') : null,
+        check_in_closes_at: includeAppointment ? new Date('2026-01-05T09:30:00Z') : null,
+        match_window_start: includeAppointment ? new Date('2026-01-05T10:00:00Z') : null,
+        match_window_end: includeAppointment ? new Date('2026-01-05T11:00:00Z') : null,
+        results_deadline_at: includeAppointment ? new Date('2026-01-05T11:30:00Z') : null,
+        match_window_timezone: 'UTC',
+        games: [1, 2, 3].map((game_number) => ({ game_number })),
+      }],
+    }],
+  };
+}

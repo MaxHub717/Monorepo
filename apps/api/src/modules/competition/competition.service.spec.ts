@@ -996,4 +996,55 @@ describe('Competition Series execution workspace', () => {
     }));
   });
 
+  it('rejects a persisted Game with missing participants before planning a Phase transition', async () => {
+    const phaseId = '70000000-0000-4000-8000-000000000002';
+    const phase = {
+      id: phaseId,
+      season_id: 'season-transition',
+      status: 'COMPLETED',
+      phase_type: 'QUALIFYING',
+      phase_number: 1,
+      end_at: new Date('2027-02-01T00:00:00Z'),
+      participating_player_ids: attendancePlayerIds,
+      season: {
+        id: 'season-transition',
+        name: 'Transition Season',
+        start_date: new Date('2027-01-01T00:00:00Z'),
+        end_date: new Date('2027-03-31T00:00:00Z'),
+        competition_timezone: 'UTC',
+      },
+      plots: [{
+        id: '90000000-0000-4000-8000-000000000002',
+        player_ids: attendancePlayerIds,
+        series: [{
+          id: attendanceSeriesId,
+          status: 'COMPLETED',
+          games: [{
+            game_number: 1,
+            home_player_id: null,
+            away_player_id: attendancePlayerIds[1],
+            status: 'COMPLETED',
+            result: 'HOME_WIN',
+            winner_player_id: attendancePlayerIds[0],
+          }],
+          resolution_audits: [],
+        }],
+      }],
+    };
+    const tx = {
+      phase: { findUnique: vi.fn().mockResolvedValue(phase) },
+      phaseTransitionAudit: { findUnique: vi.fn().mockResolvedValue(null) },
+      phaseTransition: { create: vi.fn() },
+    };
+    const service = new CompetitionService(
+      { $transaction: (callback: (transaction: typeof tx) => unknown) => callback(tx) } as any,
+      {} as any,
+    );
+
+    await expect(service.generateNextPhase(phaseId, { id: 'operator-1' })).rejects.toThrow(
+      `Series ${attendanceSeriesId} Game 1 must have two distinct valid participant IDs before Phase transition.`,
+    );
+    expect(tx.phaseTransition.create).not.toHaveBeenCalled();
+  });
+
 });

@@ -5,7 +5,7 @@ import { OutboxService } from '../events/outbox.service.js';
 import { Prisma } from '@prisma/client';
 import type { PermissionName } from '../../common/authz/authz.types.js';
 
-export type PenaltyScopeType = 'PLAYER' | 'CLUB' | 'MATCH' | 'SEASON' | 'PHASE' | 'PLOT' | 'SERIES' | 'GAME' | 'USER';
+export type PenaltyScopeType = 'PLAYER' | 'CLUB' | 'MATCH' | 'SEASON' | 'PHASE' | 'PLOT' | 'SERIES' | 'GAME' | 'USER' | 'LEGACY';
 export type PenaltyTypeValue = 'WARNING' | 'FORFEIT' | 'POINT_DEDUCTION' | 'SUSPENSION' | 'BAN' | 'DISQUALIFICATION';
 export type PenaltyStatusValue = 'PROPOSED' | 'UNDER_REVIEW' | 'APPROVED' | 'ACTIVE' | 'EXPIRED' | 'REVOKED';
 export type PenaltyEffectTypeValue =
@@ -17,6 +17,8 @@ export type PenaltyEffectTypeValue =
   | 'ADVANCEMENT_EXCLUSION'
   | 'COMPETITION_DISQUALIFICATION';
 
+export type PenaltyEffectTargetType = Exclude<PenaltyScopeType, 'LEGACY'>;
+
 export interface PenaltyActor {
   id?: string;
   role?: string;
@@ -27,7 +29,6 @@ export interface PenaltyActor {
 export class CreatePenaltyDto {
   @IsIn(['PLAYER', 'CLUB', 'MATCH', 'SEASON', 'PHASE', 'PLOT', 'SERIES', 'GAME', 'USER'])
   scopeType!: PenaltyScopeType;
-
   @IsUUID('4')
   scopeId!: string;
 
@@ -38,11 +39,9 @@ export class CreatePenaltyDto {
   @IsOptional()
   @IsUUID('4')
   clubId?: string;
-
   @IsOptional()
   @IsUUID('4')
   matchId?: string;
-
   @IsOptional()
   @IsUUID('4')
   disputeId?: string;
@@ -94,6 +93,21 @@ interface PenaltyScopeContext {
   participantIds?: string[];
 }
 
+export interface PenaltyEffectContext {
+  scopeId?: string | null;
+  matchId?: string | null;
+  playerId?: string | null;
+  clubId?: string | null;
+  userId?: string | null;
+  seasonId?: string | null;
+  phaseId?: string | null;
+  plotId?: string | null;
+  seriesId?: string | null;
+  gameId?: string | null;
+  participantIds?: string[];
+  winnerPlayerId?: string | null;
+}
+
 function jsonStringArray(value: unknown): string[] {
   if (typeof value === 'string') {
     try {
@@ -108,6 +122,45 @@ function jsonStringArray(value: unknown): string[] {
   }
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function validIdentifier(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function toPrismaJson(value: unknown): Prisma.InputJsonValue | null {
+  if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map(toPrismaJson);
+  if (typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new BadRequestException('Penalty audit data must contain only JSON-safe values.');
+  }
+
+  const entries: Array<[string, Prisma.InputJsonValue | null]> = [];
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) entries.push([key, toPrismaJson(entry)]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function legacyTarget(penalty: PenaltyEffectSource, context: PenaltyEffectContext) {
+  const candidates: Array<{ type: PenaltyEffectTargetType; id: unknown }> = [
+    { type: 'GAME', id: penalty.game_id ?? context.gameId },
+    { type: 'SERIES', id: penalty.series_id ?? context.seriesId },
+    { type: 'MATCH', id: penalty.match_id ?? context.matchId },
+    { type: 'PLAYER', id: penalty.player_id ?? context.playerId },
+    { type: 'CLUB', id: context.clubId },
+    { type: 'USER', id: context.userId },
+    { type: 'PLOT', id: context.plotId },
+    { type: 'PHASE', id: context.phaseId },
+    { type: 'SEASON', id: context.seasonId },
+  ];
+  for (const candidate of candidates) {
+    const id = validIdentifier(candidate.id);
+    if (id) return { type: candidate.type, id };
+  }
+  return undefined;
 }
 
 export function resolvePenaltyEffect(
@@ -131,7 +184,7 @@ export type PenaltyEffectActionType =
 
 export interface PenaltyEffectAction {
   type: PenaltyEffectActionType;
-  targetType: PenaltyScopeType;
+  targetType: PenaltyEffectTargetType;
   targetId: string;
   beforeState?: Record<string, unknown>;
   afterState?: Record<string, unknown>;
@@ -175,12 +228,22 @@ interface PenaltyEffectSource {
 
 export function buildPenaltyEffectPlan(
   penalty: PenaltyEffectSource,
-  context: Record<string, unknown> = {},
+  context: PenaltyEffectContext = {},
 ): PenaltyEffectPlan {
-  const penaltyId = penalty.id ?? 'unknown';
+  const penaltyId = validIdentifier(penalty.id);
+  if (!penaltyId) throw new BadRequestException('A valid penalty ID is required to plan its effect.');
   const scopeType = penalty.scope_type ?? 'PLAYER';
-  const scopeId = penalty.scope_id ?? context.scopeId ?? penalty.player_id ?? penaltyId;
-  const effectType = penalty.effect_type ?? resolvePenaltyEffect(penalty.type ?? 'WARNING', scopeType);
+  const target = scopeType === 'LEGACY' ? legacyTarget(penalty, context) : undefined;
+  const scopeId = validIdentifier(penalty.scope_id)
+    ?? validIdentifier(context.scopeId)
+    ?? target?.id
+    ?? validIdentifier(penalty.player_id)
+    ?? validIdentifier(penalty.match_id)
+    ?? validIdentifier(penalty.series_id)
+    ?? validIdentifier(penalty.game_id);
+  if (!scopeId) throw new BadRequestException(`Penalty ${penaltyId} does not have a valid scope ID.`);
+  const effectScopeType = scopeType === 'LEGACY' ? target?.type ?? 'LEGACY' : scopeType;
+  const effectType = penalty.effect_type ?? resolvePenaltyEffect(penalty.type ?? 'WARNING', effectScopeType);
 
   if (effectType === 'NONE' || penalty.status === 'REVOKED' || penalty.status === 'EXPIRED') {
     return {
@@ -201,17 +264,53 @@ export function buildPenaltyEffectPlan(
     };
   }
 
+  const legacyActionTarget = scopeType === 'LEGACY'
+    ? effectType === 'GAME_FORFEIT' || effectType === 'SERIES_FORFEIT'
+      ? [
+          { type: 'GAME' as const, id: validIdentifier(penalty.game_id ?? context.gameId) },
+          { type: 'SERIES' as const, id: validIdentifier(penalty.series_id ?? context.seriesId) },
+          { type: 'MATCH' as const, id: validIdentifier(penalty.match_id ?? context.matchId) },
+        ].find((candidate) => candidate.id !== null)
+      : { type: 'PLAYER' as const, id: validIdentifier(penalty.player_id ?? context.playerId) }
+    : { type: scopeType, id: scopeId };
+  if (!legacyActionTarget?.id) {
+    return {
+      penaltyId,
+      effectType,
+      scopeType,
+      scopeId,
+      shouldApply: false,
+      actions: [],
+      audit: {
+        action: 'PENALTY_EFFECT_SKIPPED',
+        effectType,
+        penaltyId,
+        appliedAt: new Date().toISOString(),
+        reversalAllowed: false,
+        reason: scopeType === 'LEGACY'
+          ? 'Legacy penalty has no valid reference for a supported effect target.'
+          : 'Penalty effect has no valid target ID.',
+      },
+    };
+  }
+
   const actions: PenaltyEffectAction[] = [];
   if (effectType === 'GAME_FORFEIT' || effectType === 'SERIES_FORFEIT') {
-    const targetId = penalty.game_id ?? penalty.series_id ?? penalty.match_id ?? scopeId;
+    const targetId = validIdentifier(penalty.game_id ?? context.gameId)
+      ?? validIdentifier(penalty.series_id ?? context.seriesId)
+      ?? validIdentifier(penalty.match_id ?? context.matchId)
+      ?? (scopeType === 'LEGACY' ? null : scopeId);
+    if (!targetId) {
+      throw new BadRequestException(`Penalty ${penaltyId} has no valid Game, Series, or Match target.`);
+    }
     actions.push({
       type: 'MATCH_RESULT',
-      targetType: scopeType,
+      targetType: scopeType === 'LEGACY' ? legacyActionTarget.type : scopeType,
       targetId,
       beforeState: { status: 'PENDING' },
       afterState: {
         status: effectType === 'GAME_FORFEIT' ? 'FORFEITED' : 'COMPLETED',
-        winnerPlayerId: (context.winnerPlayerId as string | null | undefined) ?? null,
+        winnerPlayerId: validIdentifier(context.winnerPlayerId),
       },
       reason: penalty.reason ?? 'Penalty effect applied',
     });
@@ -221,8 +320,8 @@ export function buildPenaltyEffectPlan(
     const delta = Number.isFinite(penalty.effect_amount) ? -(penalty.effect_amount as number) : -0;
     actions.push({
       type: 'STANDINGS_ADJUSTMENT',
-      targetType: scopeType,
-      targetId: scopeId,
+      targetType: legacyActionTarget.type,
+      targetId: legacyActionTarget.id,
       beforeState: { points: 0 },
       afterState: { points: delta },
       reason: penalty.reason ?? 'Points deductions are applied to standings.',
@@ -232,8 +331,8 @@ export function buildPenaltyEffectPlan(
   if (effectType === 'EXECUTION_BLOCK') {
     actions.push({
       type: 'PLAYER_ELIGIBILITY',
-      targetType: scopeType,
-      targetId: scopeId,
+      targetType: legacyActionTarget.type,
+      targetId: legacyActionTarget.id,
       beforeState: { eligible: true },
       afterState: { eligible: false, status: 'SUSPENDED' },
       reason: penalty.reason ?? 'Competitive participation is suspended.',
@@ -243,8 +342,8 @@ export function buildPenaltyEffectPlan(
   if (effectType === 'ADVANCEMENT_EXCLUSION') {
     actions.push({
       type: 'PARTICIPANT_STATUS',
-      targetType: scopeType,
-      targetId: scopeId,
+      targetType: legacyActionTarget.type,
+      targetId: legacyActionTarget.id,
       beforeState: { advancementEligible: true },
       afterState: { advancementEligible: false },
       reason: penalty.reason ?? 'Advancement eligibility removed.',
@@ -254,8 +353,8 @@ export function buildPenaltyEffectPlan(
   if (effectType === 'COMPETITION_DISQUALIFICATION') {
     actions.push({
       type: 'PLAYER_ELIGIBILITY',
-      targetType: scopeType,
-      targetId: scopeId,
+      targetType: legacyActionTarget.type,
+      targetId: legacyActionTarget.id,
       beforeState: { eligible: true },
       afterState: { eligible: false, status: 'BANNED' },
       reason: penalty.reason ?? 'Participant is disqualified from competition.',
@@ -564,7 +663,7 @@ export class PenaltyService {
     reason: string;
     metadata?: unknown;
   }) {
-    const metadata = input.metadata === undefined ? undefined : input.metadata as Prisma.InputJsonValue;
+    const metadata = input.metadata === undefined ? undefined : toPrismaJson(input.metadata) ?? Prisma.JsonNull;
     const auditAction = input.action === 'PENALTY_PROPOSED'
       ? 'PENALTY_PENALTY_PROPOSED'
       : input.action.startsWith('PENALTY_')
@@ -591,12 +690,12 @@ export class PenaltyService {
         actor_role: input.actor.role,
         request_id: input.actor.requestId,
         reason: input.reason,
-        before_state: input.fromStatus ? { status: input.fromStatus } : undefined,
-        after_state: {
+        before_state: input.fromStatus ? toPrismaJson({ status: input.fromStatus }) ?? Prisma.JsonNull : undefined,
+        after_state: toPrismaJson({
           action: input.action,
           ...(input.toStatus ? { status: input.toStatus } : {}),
           ...(metadata === undefined ? {} : { metadata }),
-        },
+        }) ?? Prisma.JsonNull,
       },
     });
   }
@@ -619,6 +718,9 @@ export class PenaltyEffectsService {
       playerId: penalty.player_id,
       scopeId: penalty.scope_id,
       winnerPlayerId: penalty.player_id,
+      matchId: penalty.match_id,
+      seriesId: penalty.series_id,
+      gameId: penalty.game_id,
     });
 
     if (!plan.shouldApply) {
@@ -626,44 +728,47 @@ export class PenaltyEffectsService {
     }
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      if (plan.effectType === 'EXECUTION_BLOCK' && penalty.player_id) {
+      const playerTargetId = plan.actions.find((action) => action.type === 'PLAYER_ELIGIBILITY')?.targetId;
+      if (plan.effectType === 'EXECUTION_BLOCK' && playerTargetId) {
         await tx.playerProfile.update({
-          where: { id: penalty.player_id },
+          where: { id: playerTargetId },
           data: { player_status: 'SUSPENDED' },
         });
       }
 
-      if (plan.effectType === 'COMPETITION_DISQUALIFICATION' && penalty.player_id) {
+      if (plan.effectType === 'COMPETITION_DISQUALIFICATION' && playerTargetId) {
         await tx.playerProfile.update({
-          where: { id: penalty.player_id },
+          where: { id: playerTargetId },
           data: { player_status: 'BANNED' },
         });
         await tx.divisionParticipant?.updateMany?.({
-          where: { player_id: penalty.player_id },
+          where: { player_id: playerTargetId },
           data: { status: 'DISQUALIFIED' },
         });
       }
 
       if (plan.effectType === 'POINTS_DEDUCTION') {
         const points = Math.max(0, Number(penalty.effect_amount ?? 0));
-        if (penalty.player_id && points > 0) {
+        const pointsTargetId = plan.actions.find((action) => action.type === 'STANDINGS_ADJUSTMENT')?.targetId;
+        if (pointsTargetId && points > 0) {
           await tx.standingsRow?.updateMany?.({
-            where: { player_id: penalty.player_id },
+            where: { player_id: pointsTargetId },
             data: { points: { decrement: points } },
           });
         }
       }
 
-      if (penalty.scope_type === 'MATCH' && penalty.match_id) {
+      const matchResultAction = plan.actions.find((action) => action.type === 'MATCH_RESULT');
+      if (matchResultAction?.targetType === 'MATCH') {
         await tx.match.update({
-          where: { id: penalty.match_id },
+          where: { id: matchResultAction.targetId },
           data: { status: 'FORFEITED' },
         });
       }
 
-      if (penalty.scope_type === 'SERIES' && penalty.series_id) {
+      if (matchResultAction?.targetType === 'SERIES') {
         await tx.series.update({
-          where: { id: penalty.series_id },
+          where: { id: matchResultAction.targetId },
           data: {
             status: 'ELIMINATED',
             resolution_state: 'UNRESOLVED',
@@ -672,10 +777,10 @@ export class PenaltyEffectsService {
         });
       }
 
-      if (penalty.scope_type === 'GAME' && penalty.game_id) {
+      if (matchResultAction?.targetType === 'GAME') {
         await tx.game.update({
-          where: { id: penalty.game_id },
-          data: { status: 'COMPLETED', result: 'HOME_WIN', winner_player_id: penalty.player_id },
+          where: { id: matchResultAction.targetId },
+          data: { status: 'COMPLETED', result: 'HOME_WIN', winner_player_id: validIdentifier(penalty.player_id) },
         });
       }
 
@@ -696,7 +801,7 @@ export class PenaltyEffectsService {
           actor_id: actor.id,
           actor_role: actor.role,
           reason: penalty.reason,
-          metadata: { effectType: plan.effectType, plan },
+          metadata: toPrismaJson({ effectType: plan.effectType, plan }) ?? Prisma.JsonNull,
         },
       });
       await tx.auditLog.create({
@@ -708,8 +813,8 @@ export class PenaltyEffectsService {
           actor_role: actor.role,
           request_id: actor.requestId,
           reason: penalty.reason,
-          before_state: { status: penalty.status },
-          after_state: { effectType: plan.effectType, status: updatedPenalty.status, actions: plan.actions },
+          before_state: toPrismaJson({ status: penalty.status }) ?? Prisma.JsonNull,
+          after_state: toPrismaJson({ effectType: plan.effectType, status: updatedPenalty.status, actions: plan.actions }) ?? Prisma.JsonNull,
         },
       });
 

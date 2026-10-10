@@ -193,7 +193,7 @@ export interface CompetitionPhase {
 }
 
 export interface CompetitionPlot {
-  id?: string;
+  id: string;
   phaseId?: string;
   name?: string | null;
   playerIds: string[];

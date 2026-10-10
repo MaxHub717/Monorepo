@@ -85,6 +85,7 @@ describe('ensureMatchWeeks', () => {
         { player_id: 'player-a', seed: 1, registered_at: new Date('2029-01-01T00:00:00.000Z'), competition_selected: true },
         { player_id: 'player-b', seed: 2, registered_at: new Date('2029-01-02T00:00:00.000Z'), competition_selected: true },
       ];
+      division.participants = participants;
       const pairing = buildRoundRobin(['player-a', 'player-b'], 'ROUND_ROBIN_SINGLE' as any)[0];
       const fixture: any = {
         id: 'fixture-1',
@@ -110,6 +111,7 @@ describe('ensureMatchWeeks', () => {
           findUnique: vi.fn(async () => season),
           update: vi.fn(async ({ data }) => Object.assign(season, data)),
         },
+        phase: { findMany: vi.fn().mockResolvedValue([]) },
         division: {
           findFirst: vi.fn(async () => division),
           findMany: vi.fn(async () => [{ ...division }]),

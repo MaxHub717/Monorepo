@@ -255,6 +255,51 @@ describe('Competition penalty management', () => {
     ]));
   });
 
+  it('resolves legacy penalties only from valid concrete references', () => {
+    const legacyGameForfeit = buildPenaltyEffectPlan({
+      id: penaltyId,
+      scope_type: 'LEGACY',
+      scope_id: 'legacy-scope-id',
+      game_id: gameId,
+      series_id: seriesId,
+      type: 'FORFEIT',
+      status: 'APPROVED',
+      reason: 'Legacy game forfeit',
+    });
+
+    expect(legacyGameForfeit).toMatchObject({
+      scopeType: 'LEGACY',
+      effectType: 'GAME_FORFEIT',
+      shouldApply: true,
+      actions: [expect.objectContaining({ targetType: 'GAME', targetId: gameId })],
+    });
+  });
+
+  it('rejects missing scope IDs and safely skips legacy effects without an applicable target', () => {
+    expect(() => buildPenaltyEffectPlan({
+      id: penaltyId,
+      scope_type: 'PLAYER',
+      type: 'SUSPENSION',
+      effect_type: 'EXECUTION_BLOCK',
+      status: 'APPROVED',
+    })).toThrow('does not have a valid scope ID');
+
+    const skippedLegacyEffect = buildPenaltyEffectPlan({
+      id: penaltyId,
+      scope_type: 'LEGACY',
+      scope_id: 'legacy-scope-id',
+      type: 'SUSPENSION',
+      effect_type: 'EXECUTION_BLOCK',
+      status: 'APPROVED',
+    });
+
+    expect(skippedLegacyEffect).toMatchObject({
+      shouldApply: false,
+      actions: [],
+      audit: { action: 'PENALTY_EFFECT_SKIPPED' },
+    });
+  });
+
   it('applies the penalty effect and records the action as auditable', async () => {
     const tx = {
       penalty: {
@@ -309,7 +354,22 @@ describe('Competition penalty management', () => {
       data: expect.objectContaining({ player_status: 'SUSPENDED' }),
     }));
     expect(tx.penaltyEvent.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ action: 'PENALTY_EFFECT_APPLIED' }),
+      data: expect.objectContaining({
+        action: 'PENALTY_EFFECT_APPLIED',
+        metadata: expect.objectContaining({
+          effectType: 'EXECUTION_BLOCK',
+          plan: expect.objectContaining({ scopeId: playerId, actions: expect.any(Array) }),
+        }),
+      }),
+    }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        before_state: { status: 'APPROVED' },
+        after_state: expect.objectContaining({
+          effectType: 'EXECUTION_BLOCK',
+          actions: expect.any(Array),
+        }),
+      }),
     }));
   });
 });
