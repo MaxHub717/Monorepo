@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SeasonService } from './season.service.js';
 import { expectedRoundRobinFixtureCount, MAX_FIXTURES_PER_GENERATION } from './competition-field.js';
+import { DEFAULT_COMPETITION_RULES } from '../competition/competition.domain.js';
 
 describe('competition format handling', () => {
   it('calculates both approved round-robin fixture counts explicitly', () => {
@@ -12,8 +13,12 @@ describe('competition format handling', () => {
   it('persists an explicitly selected format when creating a season', async () => {
     const tx: any = {
       league: { findFirst: vi.fn().mockResolvedValue({ id: 'league-id' }) },
+      competitionRuleset: { findFirst: vi.fn().mockResolvedValue({
+        id: 'ruleset-id', name: 'Standard Competition', version: '1.0.0', status: 'PUBLISHED', rules: DEFAULT_COMPETITION_RULES, rules_hash: 'hash-1',
+      }) },
       season: { create: vi.fn().mockResolvedValue({ id: 'season-id' }) },
       division: { create: vi.fn().mockResolvedValue({ id: 'division-id' }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-id' }) },
     };
     const outbox = { enqueueEvent: vi.fn() };
     const service = new SeasonService(
@@ -33,6 +38,20 @@ describe('competition format handling', () => {
 
     expect(tx.division.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ format: 'ROUND_ROBIN_DOUBLE' }),
+    }));
+    expect(tx.season.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        ruleset_id: 'ruleset-id',
+        ruleset_name: 'Standard Competition',
+        ruleset_version: '1.0.0',
+        competition_config: expect.objectContaining({ rules: DEFAULT_COMPETITION_RULES, rulesHash: 'hash-1' }),
+      }),
+    }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'SEASON_RULESET_ATTACHED',
+        after_state: expect.objectContaining({ rulesetId: 'ruleset-id', rulesetVersion: '1.0.0' }),
+      }),
     }));
   });
 

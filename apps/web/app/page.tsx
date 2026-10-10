@@ -17,9 +17,9 @@ export default function HomePage() {
           <h2>Standings</h2>
           <p>View current league rankings by division and season.</p>
         </Link>
-        <Link href="/fixtures" className={styles.card}>
-          <h2>Fixtures</h2>
-          <p>Browse upcoming and completed matches.</p>
+        <Link href="/seasons" className={styles.card}>
+          <h2>Competitions</h2>
+          <p>Manage Season phases, plots, Series schedules, and advancement.</p>
         </Link>
         <Link href="/mvp" className={styles.card}>
           <h2>MVP</h2>

@@ -11,13 +11,12 @@ import { UserModule } from './modules/user/user.module.js';
 import { PlayerModule } from './modules/player/player.module.js';
 import { ClubModule } from './modules/club/club.module.js';
 import { SeasonModule } from './modules/season/season.module.js';
-import { MatchModule } from './modules/match/match.module.js';
 import { DisputeModule } from './modules/dispute/dispute.module.js';
 import { PenaltyModule } from './modules/penalty/penalty.module.js';
 import { StandingsModule } from './modules/standings/standings.module.js';
 import { NotificationModule } from './modules/notification/notification.module.js';
 import { ParticipationModule } from './modules/participation/participation.module.js';
-import { FixtureModule } from './modules/fixture/fixture.module.js';
+import { CompetitionModule } from './modules/competition/competition.module.js';
 import { EventModule } from './modules/events/event.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
@@ -54,13 +53,12 @@ import { validate } from './config/env.validation.js';
     PlayerModule,
     ClubModule,
     SeasonModule,
-    MatchModule,
     DisputeModule,
     PenaltyModule,
     StandingsModule,
     NotificationModule,
     ParticipationModule,
-    FixtureModule,
+    CompetitionModule,
     AdminModule,
   ],
   controllers: [HealthController],

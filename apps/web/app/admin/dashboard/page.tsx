@@ -104,6 +104,7 @@ export default async function AdminDashboardPage() {
               <div className={styles.actionList}>
                 <Link href="/admin/leagues" className={styles.actionLink}>Manage leagues <span>↗</span></Link>
                 <Link href="/admin/seasons/new" className={styles.actionLink}>Create season <span>↗</span></Link>
+                <Link href="/admin/rulesets" className={styles.actionLink}>Competition rulesets <span>↗</span></Link>
                 <Link href="/seasons" className={styles.actionLink}>Manage seasons <span>↗</span></Link>
                 <Link href="/results" className={styles.actionLink}>Review results <span>↗</span></Link>
                 <Link href="/disputes" className={styles.actionLink}>Review disputes <span>↗</span></Link>

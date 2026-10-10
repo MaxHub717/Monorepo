@@ -4,6 +4,7 @@ import { PermissionsGuard } from '../../../common/authz/authz.guards.js';
 import { PermissionName } from '../../../common/authz/authz.types.js';
 import { CurrentUser } from '../../../common/authz/authz.decorators.js';
 import { AuthUser } from '../../../common/authz/authz.types.js';
+import { AuditService } from '../../audit/audit.service.js';
 
 /**
  * Admin Audit Controller
@@ -21,6 +22,8 @@ import { AuthUser } from '../../../common/authz/authz.types.js';
 @Controller('admin/audit')
 @UseGuards(PermissionsGuard)
 export class AdminAuditController {
+  constructor(private readonly auditService: AuditService) {}
+
   /**
    * LIST AUDIT LOGS
    * GET /admin/audit
@@ -43,12 +46,21 @@ export class AdminAuditController {
     @Query() query: Record<string, unknown>,
     @CurrentUser() user: AuthUser,
   ) {
-    return {
-      message: 'Audit log listing is not yet fully implemented',
-      note: 'Audit infrastructure exists; filtering UI is future work',
-      query,
-      user: user.id,
-    };
+    const result = await this.auditService.listLogs({
+      entityType: typeof query.entityType === 'string' ? query.entityType : undefined,
+      entityId: typeof query.entityId === 'string' ? query.entityId : undefined,
+      actorId: typeof query.actorId === 'string' ? query.actorId : undefined,
+      actorRole: typeof query.actorRole === 'string' ? query.actorRole : undefined,
+      action: typeof query.action === 'string' ? query.action : undefined,
+      correlationId: typeof query.correlationId === 'string' ? query.correlationId : undefined,
+      requestId: typeof query.requestId === 'string' ? query.requestId : undefined,
+      from: typeof query.from === 'string' ? query.from : undefined,
+      to: typeof query.to === 'string' ? query.to : undefined,
+      page: typeof query.page === 'string' ? Number(query.page) : Number(query.page ?? 1),
+      limit: typeof query.limit === 'string' ? Number(query.limit) : Number(query.limit ?? 50),
+    });
+
+    return { ...result, userId: user.id };
   }
 
   /**
@@ -69,13 +81,8 @@ export class AdminAuditController {
     @Param('entityId') entityId: string,
     @CurrentUser() user: AuthUser,
   ) {
-    return {
-      message: 'Entity history retrieval is not yet implemented',
-      note: 'Will show complete audit trail for a specific entity',
-      entityType,
-      entityId,
-      user: user.id,
-    };
+    const history = await this.auditService.getEntityHistory(entityType, entityId);
+    return { ...history, userId: user.id };
   }
 
   /**
@@ -95,13 +102,16 @@ export class AdminAuditController {
     @Query() query: Record<string, unknown>,
     @CurrentUser() user: AuthUser,
   ) {
-    return {
-      message: 'Actor history retrieval is not yet implemented',
-      note: 'Will show all actions by a specific admin/operator',
-      actorId,
-      query,
-      user: user.id,
-    };
+    const history = await this.auditService.getActorHistory(actorId, {
+      entityType: typeof query.entityType === 'string' ? query.entityType : undefined,
+      entityId: typeof query.entityId === 'string' ? query.entityId : undefined,
+      action: typeof query.action === 'string' ? query.action : undefined,
+      from: typeof query.from === 'string' ? query.from : undefined,
+      to: typeof query.to === 'string' ? query.to : undefined,
+      page: typeof query.page === 'string' ? Number(query.page) : Number(query.page ?? 1),
+      limit: typeof query.limit === 'string' ? Number(query.limit) : Number(query.limit ?? 50),
+    });
+    return { ...history, userId: user.id };
   }
 
   /**
@@ -120,12 +130,8 @@ export class AdminAuditController {
     @Param('logId') logId: string,
     @CurrentUser() user: AuthUser,
   ) {
-    return {
-      message: 'Audit log entry retrieval is not yet implemented',
-      note: 'Will show complete details for a specific audit log entry',
-      logId,
-      user: user.id,
-    };
+    const entry = await this.auditService.getAuditLogEntry(logId);
+    return { entry, userId: user.id };
   }
 
   /**
@@ -145,12 +151,15 @@ export class AdminAuditController {
     @Query() query: Record<string, unknown>,
     @CurrentUser() user: AuthUser,
   ) {
-    return {
-      message: 'Competition timeline retrieval is not yet implemented',
-      note: 'Will show competition-relevant audit events for a season',
-      seasonId,
-      query,
-      user: user.id,
-    };
+    const timeline = await this.auditService.getCompetitionTimeline(seasonId, {
+      action: typeof query.action === 'string' ? query.action : undefined,
+      actorId: typeof query.actorId === 'string' ? query.actorId : undefined,
+      actorRole: typeof query.actorRole === 'string' ? query.actorRole : undefined,
+      from: typeof query.from === 'string' ? query.from : undefined,
+      to: typeof query.to === 'string' ? query.to : undefined,
+      page: typeof query.page === 'string' ? Number(query.page) : Number(query.page ?? 1),
+      limit: typeof query.limit === 'string' ? Number(query.limit) : Number(query.limit ?? 50),
+    });
+    return { ...timeline, userId: user.id };
   }
 }

@@ -6,6 +6,10 @@ export class CreateSeasonDto {
   @IsUUID('4')
   leagueId!: string;
 
+  @IsOptional()
+  @IsUUID('4')
+  rulesetId?: string;
+
   @IsString()
   @IsNotEmpty()
   name!: string;

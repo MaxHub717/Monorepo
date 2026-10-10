@@ -361,8 +361,74 @@ export type SeasonSummary = {
   }>;
 };
 
+export type CompetitionRulesDocument = {
+  competitionStructure: Record<string, unknown>;
+  phasePlotRules: Record<string, unknown>;
+  seriesGameRules: Record<string, unknown>;
+  drawRules: Record<string, unknown>;
+  advancement: Record<string, unknown>;
+  scheduling: Record<string, unknown>;
+  checkIn: Record<string, unknown>;
+  results: Record<string, unknown>;
+  disputes: Record<string, unknown>;
+  penalties: Record<string, unknown>;
+  conduct: Record<string, unknown>;
+  participation: Record<string, unknown>;
+  paymentFees: Record<string, unknown>;
+};
+
+export type CompetitionRulesetSummary = {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  status: 'DRAFT' | 'PUBLISHED';
+  rules_hash: string | null;
+  published_at: string | null;
+  supersedes_ruleset_id: string | null;
+  created_at: string;
+};
+
+export type CompetitionRulesPreview = {
+  id: string;
+  status: 'DRAFT' | 'PUBLISHED';
+  rules: CompetitionRulesDocument;
+  rulesHash: string;
+  playerFacing: { name: string; version: string; sections: Array<{ title: string; items: string[] }>; text: string };
+};
+
+export async function getDefaultCompetitionRules(): Promise<CompetitionRulesDocument> {
+  return apiFetch<CompetitionRulesDocument>('/competition/rulesets/defaults', { cache: 'no-store' });
+}
+
+export async function listCompetitionRulesets(publishedOnly = false): Promise<CompetitionRulesetSummary[]> {
+  return apiFetch<CompetitionRulesetSummary[]>(`/competition/rulesets${publishedOnly ? '?publishedOnly=true' : ''}`, { cache: 'no-store' });
+}
+
+export async function createCompetitionRuleset(input: {
+  name: string; version: string; description?: string; rules: CompetitionRulesDocument; supersedesRulesetId?: string;
+}): Promise<CompetitionRulesetSummary> {
+  return apiFetch<CompetitionRulesetSummary>('/competition/rulesets', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function updateCompetitionRuleset(rulesetId: string, input: {
+  name?: string; description?: string; rules?: CompetitionRulesDocument;
+}): Promise<CompetitionRulesetSummary> {
+  return apiFetch<CompetitionRulesetSummary>(`/competition/rulesets/${rulesetId}`, { method: 'PUT', body: JSON.stringify(input) });
+}
+
+export async function previewCompetitionRuleset(rulesetId: string): Promise<CompetitionRulesPreview> {
+  return apiFetch<CompetitionRulesPreview>(`/competition/rulesets/${rulesetId}/preview`, { cache: 'no-store' });
+}
+
+export async function publishCompetitionRuleset(rulesetId: string): Promise<CompetitionRulesetSummary> {
+  return apiFetch<CompetitionRulesetSummary>(`/competition/rulesets/${rulesetId}/publish`, { method: 'POST' });
+}
+
 export type SeasonOverview = SeasonSummary & {
   counts: { participants: number; divisions: number; fixtures: number; matches: number; pendingResults: number; disputes: number; penalties: number; confirmedMatches: number };
+  ruleset: { id: string; name: string; version: string; status: string; publishedAt: string | null; rulesHash: string | null } | null;
+  playerFacingRules: { name: string; version: string; sections: Array<{ title: string; items: string[] }>; text: string } | null;
   divisions: Array<{ id: string; name: string; type: string; format: string; capacity: number | null; active: boolean; _count: { participants: number; fixtures: number; matches: number; standings_rows: number } }>;
   nextAction: { label: string; endpoint: string; reason: string } | null;
   readiness: { canAdvance: boolean; issues: string[] };
@@ -419,6 +485,282 @@ export type SeasonFixtureSchedule = {
   divisions: DivisionFixtureSchedule[];
 };
 
+export type CompetitionScheduleIssue = {
+  code: string;
+  seriesId: string;
+  message: string;
+};
+
+export type CompetitionWorkspace = {
+  serverTime: string;
+  season: {
+    id: string;
+    name: string;
+    leagueName: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    timezone: string;
+  };
+  currentPhaseId: string | null;
+  summary: {
+    phaseCount: number;
+    plotCount: number;
+    participantCount: number;
+    seriesCount: number;
+    completedSeriesCount: number;
+    pendingSeriesCount: number;
+    unresolvedSeriesCount: number;
+    completedGameCount: number;
+    gameCount: number;
+    conflictCount: number;
+  };
+  validation: {
+    valid: boolean;
+    canLock: boolean;
+    errors: CompetitionScheduleIssue[];
+    blockers: CompetitionScheduleIssue[];
+    warnings: CompetitionScheduleIssue[];
+  };
+  capacity: {
+    feasible: boolean;
+    blockers: Array<{ phaseNumber: number | null; code: string; message: string }>;
+    protectedFinalWeekStartAt: string;
+    phases: Array<{
+      phaseNumber: number;
+      seriesCount: number;
+      durationMs: number;
+      startAt: string | null;
+      endAt: string | null;
+      isFinalPhase: boolean;
+    }>;
+  } | null;
+  phases: Array<{
+    id: string;
+    number: number;
+    type: string;
+    name: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    scheduleLocked: boolean;
+    participantCount: number;
+    progression: {
+      phaseFinalized: boolean;
+      participantCount: number;
+      playedSeriesCount: number;
+      pendingSeriesCount: number;
+      gamesPlayedCount: number;
+      survivors: string[];
+      advancementEligiblePlayerIds: string[];
+      participants: Array<{
+        playerId: string;
+        gamerTag: string;
+        plotIds: string[];
+        plotNames: string[];
+        seriesPlayed: number;
+        gamesPlayed: number;
+        seriesWins: number;
+        seriesLosses: number;
+        eliminations: number;
+        survivor: boolean;
+        advancementEligible: boolean;
+      }>;
+    };
+    plotCount: number;
+    seriesCount: number;
+    completedSeriesCount: number;
+    pendingSeriesCount: number;
+    completedGameCount: number;
+    gameCount: number;
+    advancementStatus: string;
+    scheduleStatus: string;
+    conflicts: number;
+    validation: { valid: boolean; blockers: CompetitionScheduleIssue[] };
+    plots: Array<{
+      id: string;
+      name: string;
+      participantIds: string[];
+      participantCount: number;
+      series: Array<{
+        id: string;
+        number: number | null;
+        status: string;
+        playerIds: string[];
+        matchWindowStartAt: string | null;
+        matchWindowEndAt: string | null;
+        checkInOpensAt: string | null;
+        checkInClosesAt: string | null;
+        resultsDeadlineAt: string | null;
+        timezone: string | null;
+        winnerPlayerId: string | null;
+        eliminationOutcome: string | null;
+        games: Array<{ id: string; number: number; status: string; result: string | null; winnerPlayerId: string | null }>;
+        checkIn: {
+          state: 'NOT_SCHEDULED' | 'NOT_OPEN' | 'OPEN' | 'CLOSED';
+          opensAt: string | null;
+          closesAt: string | null;
+          canManageExceptions: boolean;
+          exceptionAllowed: boolean;
+          attendancePolicy: string;
+          checkedInCount: number;
+          participants: Array<{
+            playerId: string;
+            gamerTag: string;
+            status: 'CHECKED_IN' | 'NOT_CHECKED_IN';
+            checkedInAt: string | null;
+            isException: boolean;
+            exceptionReason: string | null;
+          }>;
+        };
+        execution: { status: 'NOT_READY' | 'READY' | 'IN_PROGRESS'; canStart: boolean };
+      }>;
+    }>;
+  }>;
+};
+
+export async function getCompetitionWorkspace(seasonId: string): Promise<CompetitionWorkspace> {
+  return apiFetch<CompetitionWorkspace>(`/competition/seasons/${seasonId}/workspace`, { cache: 'no-store' });
+}
+
+export async function generateCompetitionSchedule(seasonId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/competition/seasons/${seasonId}/schedule/generate`, { method: 'POST' });
+}
+
+export async function adjustCompetitionSeriesSchedule(
+  seriesId: string,
+  input: { matchWindowStartAt: string; reason?: string },
+): Promise<unknown> {
+  return apiFetch<unknown>(`/competition/series/${seriesId}/schedule`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function validateCompetitionSchedule(seasonId: string): Promise<CompetitionWorkspace['validation']> {
+  return apiFetch<CompetitionWorkspace['validation']>(`/competition/seasons/${seasonId}/schedule/validate`, { method: 'POST' });
+}
+
+export async function lockCompetitionSchedule(seasonId: string): Promise<{ scheduleLocked: boolean }> {
+  return apiFetch<{ scheduleLocked: boolean }>(`/competition/seasons/${seasonId}/schedule/lock`, { method: 'POST' });
+}
+
+export async function recordCompetitionSeriesCheckIn(
+  seriesId: string,
+  playerId: string,
+  input: { isException?: boolean; reason?: string; evidenceUrl?: string } = {},
+): Promise<{ alreadyCheckedIn: boolean; checked_in_at: string; is_exception: boolean }> {
+  return apiFetch<{ alreadyCheckedIn: boolean; checked_in_at: string; is_exception: boolean }>(`/competition/series/${seriesId}/check-ins/${playerId}`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function startCompetitionSeries(seriesId: string): Promise<{ id: string; status: string }> {
+  return apiFetch<{ id: string; status: string }>(`/competition/series/${seriesId}/start`, { method: 'POST' });
+}
+
+export type SeriesExecutionWorkspace = {
+  serverTime: string;
+  season: { id: string; name: string };
+  phase: { id: string; number: number; name: string; status: string; scheduleLocked: boolean };
+  plot: { id: string; name: string };
+  series: {
+    id: string;
+    number: number | null;
+    status: string;
+    resultState: string;
+    winnerPlayerId: string | null;
+    winnerGamerTag: string | null;
+    canComplete: boolean;
+  };
+  participants: Array<{ id: string; gamerTag: string; checkedIn: boolean }>;
+  matchWindow: {
+    startsAt: string | null;
+    endsAt: string | null;
+    timezone: string;
+    state: string;
+    remainingMs: number | null;
+    resultSubmissionState: string;
+  };
+  checkIn: { state: string; opensAt: string | null; closesAt: string | null; checkedInCount: number; requiredCount: number };
+  currentScore: { gameNumber: number; home: number; away: number } | null;
+  seriesScore: { homeWins: number; awayWins: number; draws: number } | null;
+  games: Array<{
+    id: string;
+    number: number;
+    status: string;
+    homePlayerId: string | null;
+    homeGamerTag: string | null;
+    awayPlayerId: string | null;
+    awayGamerTag: string | null;
+    homeScore: number;
+    awayScore: number;
+    result: string | null;
+    verificationStatus: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'CORRECTION_REQUESTED' | 'OVERRIDDEN';
+    verificationReason: string | null;
+    winnerPlayerId: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    canStart: boolean;
+    canUpdateScore: boolean;
+    canRecordResult: boolean;
+    canVerifyResult: boolean;
+    canOverrideResult: boolean;
+  }>;
+};
+
+export async function getSeriesExecutionWorkspace(seriesId: string): Promise<SeriesExecutionWorkspace> {
+  return apiFetch<SeriesExecutionWorkspace>(`/competition/series/${seriesId}/execution`, { cache: 'no-store' });
+}
+
+export async function startCompetitionGame(seriesId: string, gameId: string): Promise<unknown> {
+  return apiFetch(`/competition/series/${seriesId}/games/${gameId}/start`, { method: 'POST' });
+}
+
+export async function updateCompetitionGameScore(
+  seriesId: string,
+  gameId: string,
+  input: { homeScore: number; awayScore: number },
+): Promise<unknown> {
+  return apiFetch(`/competition/series/${seriesId}/games/${gameId}/score`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export async function completeCompetitionGame(
+  seriesId: string,
+  gameId: string,
+  input: { result: 'HOME_WIN' | 'AWAY_WIN' | 'DRAW' | 'UNRESOLVED'; homeScore: number; awayScore: number; reason?: string },
+): Promise<unknown> {
+  return apiFetch(`/competition/series/${seriesId}/games/${gameId}/complete`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function verifyCompetitionGameResult(
+  seriesId: string,
+  gameId: string,
+  input: { status: 'APPROVED' | 'REJECTED' | 'CORRECTION_REQUESTED'; reason?: string },
+): Promise<{ id: string; status: string; alreadyVerified: boolean }> {
+  return apiFetch(`/competition/series/${seriesId}/games/${gameId}/verification`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function overrideCompetitionGameResult(
+  seriesId: string,
+  gameId: string,
+  input: {
+    result: 'HOME_WIN' | 'AWAY_WIN' | 'DRAW' | 'UNRESOLVED';
+    homeScore: number;
+    awayScore: number;
+    reason: string;
+    evidenceUrl?: string;
+    reference?: string;
+  },
+): Promise<{ id: string; resultVersion: number; result: string; winnerPlayerId: string | null; verificationStatus: 'OVERRIDDEN' }> {
+  return apiFetch(`/competition/series/${seriesId}/games/${gameId}/override`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function completeCompetitionSeries(seriesId: string): Promise<unknown> {
+  return apiFetch(`/competition/series/${seriesId}/complete`, { method: 'POST' });
+}
+
 export type DivisionFixturePage = {
   divisionId: string;
   scheduleLocked: boolean;
@@ -442,7 +784,7 @@ export type DivisionFixturePage = {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 };
 
-export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
+export async function createSeason(payload: { leagueId: string; rulesetId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
 

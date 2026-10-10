@@ -1,0 +1,1612 @@
+NGL Season Lifecycle & Competition Timing Model
+
+**Status:** Canonical
+**Version:** v1.0
+**Applies to:** NGL Competition & Scheduling Engine v2
+**Related:** NGL Competition & Scheduling Specification v2
+
+---
+
+# 1. Purpose
+
+This document defines the temporal structure of an NGL season.
+
+It establishes:
+
+* how long a season lasts;
+* how Season start and end dates are configured;
+* how Phase lifetimes are determined;
+* how the competition engine fits all Phases inside the Season lifetime;
+* how the final Phase is protected from extending beyond the Season;
+* which days and hours the scheduling engine may use;
+* how the system prevents unrealistic schedules;
+* how Season timing affects Phase generation and scheduling.
+
+The central rule is:
+
+> **A Season has a fixed lifetime. All competition Phases must fit within that lifetime, and the final Phase must be completed within the final week of the Season.**
+
+---
+
+# 2. Core Temporal Hierarchy
+
+The competition timing hierarchy is:
+
+```text
+Season
+│
+├── Start Date
+├── End Date
+│
+├── Phase 1
+│   ├── Plot
+│   └── Series
+│
+├── Phase 2
+│   ├── Plot
+│   └── Series
+│
+├── Phase 3
+│
+├── ...
+│
+└── Final Phase
+    └── Must conclude within final Season week
+```
+
+The Season is the **hard temporal boundary**.
+
+Phases are subordinate to the Season.
+
+A Phase cannot independently extend the Season.
+
+---
+
+# 3. Season Start and End Dates
+
+Every Season must have:
+
+```text
+season_start_date
+season_end_date
+```
+
+These are required when an Administrator creates a Season.
+
+Example:
+
+```text
+Season:
+2027 Season 1
+
+Start:
+1 January 2027
+
+End:
+31 March 2027
+```
+
+This represents approximately a three-month / twelve-week competition lifetime.
+
+The Season dates become the authoritative time boundary for:
+
+* registration;
+* competition phases;
+* Series scheduling;
+* final competition;
+* Season completion.
+
+---
+
+# 4. Season Duration
+
+Season duration is calculated from the configured start and end dates.
+
+The system must not assume that every Season is exactly three months.
+
+Examples:
+
+```text
+4-week Season
+8-week Season
+12-week Season
+16-week Season
+```
+
+are all technically possible if permitted by the Season configuration.
+
+The competition engine must calculate the actual available scheduling period from the configured dates.
+
+---
+
+# 5. Season Creation Requirements
+
+When creating a Season, the Administrator must provide:
+
+```text
+Season Name
+Start Date
+End Date
+Registration Opening
+Registration Closing
+Competition Configuration
+Ruleset
+Timezone
+```
+
+At minimum, the system must enforce:
+
+```text
+Start Date < End Date
+```
+
+Registration dates must fit inside the Season lifecycle.
+
+The competition itself must also fit inside the Season lifecycle.
+
+---
+
+# 6. Season Lifetime Is a Hard Constraint
+
+The competition engine must never generate a competition schedule that requires activity beyond:
+
+```text
+Season End Date
+```
+
+Therefore:
+
+```text
+Phase 1
++
+Phase 2
++
+Phase 3
++
+...
++
+Final Phase
+```
+
+must fit inside the Season lifetime.
+
+The scheduler must reject a schedule if completing the required Series would extend beyond the Season boundary.
+
+---
+
+# 7. Phase Lifetime
+
+A Phase does not have an arbitrary fixed duration.
+
+Its required duration is calculated from:
+
+```text
+Number of competing players
++
+Number of Series
++
+Available scheduling capacity
++
+Allowed scheduling days
++
+Allowed scheduling hours
++
+Series duration
+```
+
+Therefore Phase duration is dynamic.
+
+The existing competition model already establishes that Phase duration depends on the number of competitors and that Phase 1 should normally take the longest because it contains the largest field.
+
+---
+
+# 8. Phase Duration Principle
+
+The general rule is:
+
+> **The larger the active competition field, the more scheduling capacity the Phase requires.**
+
+Therefore:
+
+```text
+Phase 1
+→ largest field
+→ largest number of Series
+→ longest expected duration
+```
+
+As players are eliminated:
+
+```text
+Phase 2
+→ fewer players
+→ fewer Series
+→ shorter expected duration
+```
+
+Then:
+
+```text
+Phase 3
+→ fewer players
+→ fewer Series
+→ shorter expected duration
+```
+
+and so on.
+
+The system should therefore naturally compress the later competition stages.
+
+---
+
+# 9. Phase Scheduling Must Be Forward-Looking
+
+The system must not schedule a Phase simply because the Phase itself can fit into the immediately available days.
+
+Before generating or locking a Phase schedule, the system must consider:
+
+```text
+Current Phase
++
+Remaining Phases
++
+Final Phase deadline
+```
+
+This prevents Phase 1 from consuming so much time that the later phases cannot realistically be completed.
+
+---
+
+# 10. Final Phase Deadline
+
+The final Phase has a special requirement.
+
+> **The final Phase must be completed within the final week of the Season.**
+
+This creates a protected closing period for the competition.
+
+For example:
+
+```text
+Season
+12 weeks
+│
+├── Week 1
+├── Week 2
+├── Week 3
+├── Week 4
+├── Week 5
+├── Week 6
+├── Week 7
+├── Week 8
+├── Week 9
+├── Week 10
+├── Week 11
+└── Week 12
+     ↑
+     Final Phase
+```
+
+The system must reserve the final week for the final competition stage.
+
+---
+
+# 11. Final Week Is a Protected Competition Window
+
+The final week is not simply leftover time.
+
+It is a protected deadline window.
+
+The competition engine should therefore calculate:
+
+```text
+Season End
+    ↓
+Final Week Boundary
+    ↓
+Final Phase Deadline
+```
+
+The final Phase must be scheduled so that its required Series and result-processing windows complete before the Season ends.
+
+This protects the Season from remaining permanently `ACTIVE` because earlier phases consumed too much time.
+
+---
+
+# 12. Phase Planning Example — 12-Week Season
+
+Example:
+
+```text
+Season Duration:
+12 weeks
+```
+
+Possible competition allocation:
+
+```text
+Phase 1
+Weeks 1–6
+
+Phase 2
+Weeks 7–8
+
+Phase 3
+Weeks 9–10
+
+Phase 4
+Weeks 11–12
+```
+
+This is an **illustrative allocation**, not a hardcoded formula.
+
+The actual system determines the required duration from the number of Series and available scheduling capacity.
+
+The important constraint is:
+
+```text
+Final Phase
+≤ final Season week
+```
+
+---
+
+# 13. Phase 1 Must Not Consume the Entire Season
+
+A common failure would be:
+
+```text
+Phase 1
+Weeks 1–10
+
+Phase 2
+Weeks 11–12
+```
+
+when the competition requires:
+
+```text
+Phase 2
++
+Phase 3
++
+Final Phase
+```
+
+The scheduler must identify this before Phase 1 is locked.
+
+Therefore Phase generation and scheduling must be **season-aware**.
+
+---
+
+# 14. Remaining Competition Capacity
+
+At any point, the system should be able to determine:
+
+```text
+Season Time Remaining
+```
+
+and:
+
+```text
+Competition Work Remaining
+```
+
+Conceptually:
+
+```text
+Available Competition Time
+        ≥
+Required Time For Remaining Phases
+```
+
+If the remaining time is insufficient, the system must not silently create an impossible schedule.
+
+It should return a scheduling failure/blocker indicating that the remaining Season lifetime cannot accommodate the required competition.
+
+---
+
+# 15. Scheduling Days
+
+For the current NGL implementation, the allowed competition schedule days are:
+
+```text
+Monday
+Tuesday
+Wednesday
+Thursday
+Friday
+Saturday
+```
+
+Sunday is not an allowed Series scheduling day.
+
+Therefore:
+
+```text
+Sunday
+→ No automatically generated Series
+```
+
+This rule applies to the scheduling engine.
+
+---
+
+# 16. Allowed Scheduling Hours
+
+Automatically generated Series may be scheduled only between:
+
+```text
+10:00 AM
+and
+10:00 PM
+```
+
+in the applicable competition timezone.
+
+Therefore the scheduler must not create Series appointments outside:
+
+```text
+10:00 – 22:00
+```
+
+---
+
+# 17. Series Duration Constraint
+
+The Series remains the scheduling unit.
+
+Each Series has a:
+
+```text
+1-hour Match Window
+```
+
+All three Games belonging to the Series must be played inside that one-hour window.
+
+The existing competition model explicitly defines this requirement.
+
+Therefore the scheduler must reserve a complete one-hour appointment for every Series.
+
+---
+
+# 18. Check-In Window
+
+For a Series beginning at:
+
+```text
+T
+```
+
+the check-in lifecycle is:
+
+```text
+T - 60 minutes
+    Check-in opens
+
+T - 30 minutes
+    Check-in closes
+
+T
+    Series begins
+```
+
+This means a player must complete check-in during the one-hour pre-match period.
+
+---
+
+# 19. Match Window
+
+The Series Match Window is:
+
+```text
+T → T + 60 minutes
+```
+
+All three Games must be completed during this period.
+
+The system must therefore not schedule:
+
+```text
+Game 1
+10:00
+
+Game 2
+11:00
+
+Game 3
+12:00
+```
+
+as separate appointments.
+
+Instead:
+
+```text
+Series
+10:00–11:00
+
+Game 1
+Game 2
+Game 3
+```
+
+all occur inside that Series window.
+
+---
+
+# 20. Results Window
+
+After the one-hour Match Window:
+
+```text
+T + 60 minutes
+```
+
+the match window closes.
+
+The Results Window remains open for an additional:
+
+```text
+30 minutes
+```
+
+Therefore:
+
+```text
+T + 90 minutes
+```
+
+is the final results-processing deadline.
+
+Example:
+
+```text
+09:00
+Check-in opens
+
+09:30
+Check-in closes
+
+10:00
+Series begins
+
+11:00
+Series Match Window closes
+
+11:30
+Results Window closes
+```
+
+The existing competition source establishes this same relationship between the one-hour match window and the additional 30-minute results window.
+
+---
+
+# 21. Scheduling Time Must Include the Full Series Lifecycle
+
+The scheduler must not calculate capacity using only the one-hour match window.
+
+Each appointment consumes:
+
+```text
+Check-in lifecycle
++
+1-hour Match Window
++
+Results processing deadline
+```
+
+However, the **10:00–22:00 scheduling restriction applies to the Series Match Window**.
+
+The system must ensure that the generated appointment does not create an invalid operational window around the allowed schedule.
+
+---
+
+# 22. Earliest Automatically Generated Series
+
+The earliest Series Match Window is:
+
+```text
+10:00
+```
+
+Therefore:
+
+```text
+Check-in opens:
+09:00
+
+Check-in closes:
+09:30
+
+Match:
+10:00–11:00
+
+Results deadline:
+11:30
+```
+
+This is valid.
+
+---
+
+# 23. Latest Automatically Generated Series
+
+The latest Series Match Window is:
+
+```text
+21:00–22:00
+```
+
+This ensures that the one-hour Match Window remains completely inside the:
+
+```text
+10:00–22:00
+```
+
+operating period.
+
+The resulting lifecycle is:
+
+```text
+20:00
+Check-in opens
+
+20:30
+Check-in closes
+
+21:00
+Series begins
+
+22:00
+Match Window closes
+
+22:30
+Results Window closes
+```
+
+The Series itself remains inside the allowed scheduling hours.
+
+---
+
+# 24. Timezone
+
+The scheduling hours are interpreted according to the configured competition timezone.
+
+For example:
+
+```text
+Competition Timezone:
+Africa/Lagos
+```
+
+means:
+
+```text
+Monday–Saturday
+10:00–22:00
+Africa/Lagos
+```
+
+The stored appointment should retain its timezone context.
+
+The system must not interpret:
+
+```text
+10:00
+```
+
+as a universal UTC value.
+
+---
+
+# 25. Timezone Rule
+
+The canonical rule is:
+
+> **Allowed scheduling hours are local competition hours, not raw UTC hours.**
+
+The scheduler converts the configured competition-local schedule into its persisted timestamp representation.
+
+This prevents timezone conversion from accidentally moving Series outside the permitted operating period.
+
+---
+
+# 26. Phase Duration Calculation
+
+The scheduling engine should calculate the minimum required Phase duration from:
+
+```text
+Series Count
+×
+Series Scheduling Capacity
+```
+
+subject to:
+
+```text
+Monday–Saturday
+10:00–22:00
+```
+
+and the configured competition timezone.
+
+The system should then determine:
+
+```text
+Earliest possible completion
+```
+
+and:
+
+```text
+Latest allowable completion
+```
+
+for the Phase.
+
+---
+
+# 27. Phase Deadline
+
+Every Phase must have a calculated deadline:
+
+```text
+phase_deadline
+```
+
+For normal phases:
+
+```text
+phase_deadline
+≤
+next phase's required start
+```
+
+For the final Phase:
+
+```text
+phase_deadline
+≤
+Season End Date
+```
+
+The final Phase additionally receives the protected final-week allocation.
+
+---
+
+# 28. Phase Planning Model
+
+The competition engine should maintain:
+
+```text
+Current Phase
+Remaining Phases
+Available Season Time
+Required Series
+Available Scheduling Capacity
+```
+
+before scheduling.
+
+Conceptually:
+
+```text
+Season
+│
+├── Current Date
+│
+├── Season End
+│
+├── Final Week Boundary
+│
+├── Current Phase
+│
+└── Estimated Remaining Competition
+```
+
+This becomes the basis for schedule feasibility.
+
+---
+
+# 29. Dynamic Phase Duration
+
+The system should not assign:
+
+```text
+Phase 1 = 4 weeks
+Phase 2 = 2 weeks
+Phase 3 = 1 week
+```
+
+universally.
+
+Instead it calculates the required duration from the actual competition.
+
+For example:
+
+```text
+1000 players
+→ many Phase 1 Series
+→ greater scheduling requirement
+
+500 survivors
+→ fewer Phase 2 Series
+
+250 survivors
+→ fewer Phase 3 Series
+
+...
+→ final phase
+→ very small number of Series
+```
+
+Therefore the Phase duration naturally decreases as the competition progresses.
+
+---
+
+# 30. Season Feasibility Check
+
+Before competition scheduling begins, the system should calculate whether the Season configuration is feasible.
+
+Conceptually:
+
+```text
+Season Start
++
+Available Scheduling Capacity
++
+Expected Competition Work
+≤
+Season End
+```
+
+If the competition cannot fit:
+
+```text
+Season Configuration
+→ INVALID / INSUFFICIENT TIME
+```
+
+The Administrator must be informed before the competition is activated.
+
+---
+
+# 31. Registration Capacity and Season Lifetime
+
+Participant capacity cannot be evaluated independently of time.
+
+For example:
+
+```text
+100 players
+```
+
+may be feasible for a 12-week Season.
+
+But:
+
+```text
+2,000 players
+```
+
+may require more scheduling capacity than the Season can provide.
+
+Therefore the system must evaluate:
+
+```text
+Participant Count
++
+Series Count
++
+Schedule Capacity
++
+Season Duration
+```
+
+together.
+
+This is particularly important because the competition model intentionally supports large registration pools.
+
+---
+
+# 32. Season Creation Validation
+
+When an Administrator creates a Season, the system should validate:
+
+### Required
+
+```text
+Start Date exists
+End Date exists
+Start < End
+Timezone exists
+```
+
+### Competition timing
+
+```text
+Season provides sufficient competition time
+Final week is available
+Allowed scheduling days exist
+Allowed scheduling hours are valid
+```
+
+### Registration timing
+
+```text
+Registration Open
+<
+Registration Close
+≤
+Season Start / competition lock boundary
+```
+
+The exact registration relationship should be finalized in the Season lifecycle implementation ticket.
+
+---
+
+# 33. Season Lifecycle
+
+The overall lifecycle becomes:
+
+```text
+DRAFT
+   ↓
+REGISTRATION_OPEN
+   ↓
+REGISTRATION_CLOSED
+   ↓
+ROSTER_LOCKED
+   ↓
+COMPETITION_INITIALIZATION
+   ↓
+PHASE_1_ACTIVE
+   ↓
+PHASE_1_COMPLETED
+   ↓
+PHASE_2_ACTIVE
+   ↓
+PHASE_2_COMPLETED
+   ↓
+...
+   ↓
+FINAL_PHASE_ACTIVE
+   ↓
+FINAL_PHASE_COMPLETED
+   ↓
+SEASON_COMPLETED
+   ↓
+ARCHIVED
+```
+
+The exact persisted Season status vocabulary may continue using the existing implementation where appropriate, but Phase activity must now exist independently inside the Season.
+
+---
+
+# 34. Season Completion
+
+A Season cannot be completed merely because its calendar end date has arrived.
+
+The competition engine should require:
+
+```text
+Final Phase completed
++
+Final Series resolved
++
+Champion/outcome determined
++
+Required results finalized
+```
+
+before marking the Season:
+
+```text
+COMPLETED
+```
+
+However, the competition must be planned so that this completion occurs before the Season End Date.
+
+---
+
+# 35. Final Week Protection
+
+The final week is therefore a **deadline reservation**.
+
+The system must avoid scheduling earlier phases so late that:
+
+```text
+Final Phase
+cannot fit inside final week
+```
+
+If this situation occurs:
+
+```text
+Schedule Generation
+→ BLOCKED
+```
+
+with a clear reason such as:
+
+> The remaining Season lifetime cannot accommodate the required final Phase within the protected final week.
+
+---
+
+# 36. Operator Adjustment
+
+Administrators may manually adjust Series schedules before schedule lock.
+
+However, manual adjustment must still respect:
+
+```text
+Season Start
+Season End
+Final Phase Deadline
+Monday–Saturday
+10:00–22:00
+1-hour Series Match Window
+Check-in Window
+Results Window
+```
+
+An operator cannot manually create an appointment that the automatic scheduler would reject.
+
+---
+
+# 37. Schedule Validation
+
+Schedule validation must therefore check:
+
+```text
+Series has appointment
+        ↓
+Appointment is inside Season
+        ↓
+Day is Monday–Saturday
+        ↓
+Match Window is 10:00–22:00
+        ↓
+Match Window = 1 hour
+        ↓
+Check-in window is valid
+        ↓
+Results deadline is valid
+        ↓
+No player conflict
+        ↓
+No Series conflict
+        ↓
+Phase deadline satisfied
+        ↓
+Final Phase deadline satisfied
+```
+
+This becomes part of the canonical Schedule Validation Engine.
+
+---
+
+# 38. No Sunday Auto-Scheduling
+
+The automatic scheduler must never generate:
+
+```text
+Sunday Series
+```
+
+even if Sunday appears to provide otherwise useful capacity.
+
+Sunday may remain an administrative/non-competition day.
+
+If a future rule permits Sunday competition, that must be an explicit competition configuration change rather than an implicit scheduler behavior.
+
+---
+
+# 39. No Overnight Series
+
+The scheduler must never create a Series that crosses the daily operating boundary.
+
+Invalid:
+
+```text
+21:30–22:30
+```
+
+Valid:
+
+```text
+21:00–22:00
+```
+
+This rule prevents a one-hour Series from extending beyond the allowed competition hours.
+
+---
+
+# 40. No Unrealistic Compression
+
+The scheduler must not solve a deadline problem by generating an unrealistic density of Series.
+
+For example, if a Phase contains more Series than can reasonably be scheduled within:
+
+```text
+Monday–Saturday
+10:00–22:00
+```
+
+the system must report:
+
+```text
+INSUFFICIENT_SCHEDULING_CAPACITY
+```
+
+rather than simply stacking impossible appointments.
+
+---
+
+# 41. Competition Timing Principle
+
+The complete scheduling principle is:
+
+```text
+Season Lifetime
+        ↓
+Final Week Reservation
+        ↓
+Remaining Phase Time
+        ↓
+Phase Series Count
+        ↓
+Available Scheduling Capacity
+        ↓
+Series Appointments
+```
+
+The scheduler works **from the Season boundary downward**.
+
+It must not work only from individual Series upward.
+
+---
+
+# 42. Example — 12-Week Season
+
+Suppose:
+
+```text
+Season:
+12 weeks
+
+Start:
+Week 1
+
+End:
+Week 12
+```
+
+The system knows:
+
+```text
+Week 12
+=
+Final Phase reservation
+```
+
+It then evaluates the expected competition:
+
+```text
+Phase 1
+Largest field
+
+Phase 2
+Smaller field
+
+Phase 3
+Smaller field
+
+Final Phase
+Smallest field
+```
+
+The scheduler calculates whether Phase 1 can fit while preserving enough capacity for:
+
+```text
+Phase 2
++
+Phase 3
++
+Final Phase
+```
+
+If yes:
+
+```text
+Schedule generation allowed
+```
+
+If no:
+
+```text
+Schedule generation blocked
+```
+
+---
+
+# 43. Example — Large Registration
+
+Suppose:
+
+```text
+1,000 players
+12-week Season
+```
+
+The competition engine may produce approximately:
+
+```text
+Phase 1
+1,000 players
+↓
+500 potential winners
+
+Phase 2
+500 players
+↓
+250 potential winners
+
+Phase 3
+250 players
+↓
+125 potential winners
+
+...
+```
+
+The actual field can decrease faster because a Series can eliminate both players under the draw/unresolved rules.
+
+The scheduler must therefore use the **actual current Phase Series count**, not assume that every Phase will produce exactly half the participants.
+
+---
+
+# 44. Relationship to Phase Generation
+
+Phase generation and scheduling are related but separate responsibilities.
+
+### Phase Engine determines:
+
+```text
+Who competes
+How many plots
+Who belongs to each plot
+Which Series exist
+```
+
+### Scheduling Engine determines:
+
+```text
+When each Series is played
+```
+
+### Season Timing Engine determines:
+
+```text
+Whether the entire competition can fit
+```
+
+Therefore:
+
+```text
+Phase Engine
+      ↓
+Series Engine
+      ↓
+Season Timing Engine
+      ↓
+Scheduling Engine
+```
+
+---
+
+# 45. Required Development Components
+
+This model introduces several explicit technical capabilities.
+
+## Season Timing
+
+Responsible for:
+
+* Season duration;
+* Season deadline;
+* final-week boundary;
+* available scheduling days;
+* available scheduling hours;
+* timezone.
+
+## Phase Capacity Planner
+
+Responsible for:
+
+* Series count;
+* estimated Phase duration;
+* remaining Season capacity;
+* future Phase reservation.
+
+## Schedule Feasibility Engine
+
+Responsible for:
+
+* checking whether a Phase can fit;
+* checking whether remaining Phases can fit;
+* protecting final week;
+* rejecting impossible schedules.
+
+## Series Scheduler
+
+Responsible for:
+
+* assigning Series appointments;
+* applying allowed days;
+* applying allowed hours;
+* respecting conflicts;
+* generating check-in and result windows.
+
+---
+
+# 46. Development Data Model Additions
+
+The Season model must support at minimum:
+
+```text
+start_date
+end_date
+timezone
+```
+
+The Phase model should support:
+
+```text
+phase_number
+starts_at
+ends_at
+status
+```
+
+The Series model should support:
+
+```text
+scheduled_at
+scheduled_timezone
+check_in_opens_at
+check_in_closes_at
+match_window_opens_at
+match_window_closes_at
+results_window_closes_at
+```
+
+The exact field names remain subject to the Prisma schema design.
+
+---
+
+# 47. Configuration vs Hard Rules
+
+The current rules should be divided into two categories.
+
+## Season-configurable
+
+```text
+Season start date
+Season end date
+Competition timezone
+Registration dates
+Participant capacity
+Competition ruleset
+```
+
+## Current NGL scheduling rules
+
+```text
+Allowed days:
+Monday–Saturday
+
+Allowed Match Window:
+10:00–22:00
+
+Series duration:
+1 hour
+
+Check-in:
+opens 1 hour before
+
+Check-in closes:
+30 minutes before
+
+Results window:
+30 minutes after Match Window
+
+Final Phase:
+must complete within final Season week
+```
+
+These rules should not be scattered across controllers or frontend components.
+
+They belong in the competition configuration/ruleset layer.
+
+---
+
+# 48. Rule Changes
+
+If NGL later decides to allow:
+
+```text
+Sunday
+or
+08:00–23:00
+or
+90-minute Series
+```
+
+these should become explicit ruleset/configuration changes.
+
+They must not require rewriting scheduling logic throughout the application.
+
+---
+
+# 49. Canonical Timing Rules
+
+The current canonical rules are:
+
+```text
+1. Every Season has a Start Date.
+
+2. Every Season has an End Date.
+
+3. The Season lifetime is the hard competition boundary.
+
+4. All Phases must fit inside the Season lifetime.
+
+5. Phase duration is dynamically determined by competition workload and available scheduling capacity.
+
+6. Phase 1 normally requires the most time because it contains the largest field.
+
+7. Later Phases normally require less time as the field decreases.
+
+8. The final Phase must be completed within the final week of the Season.
+
+9. Automatically generated Series may only be scheduled Monday–Saturday.
+
+10. Sunday is not an automatic competition scheduling day.
+
+11. Series Match Windows may only begin and end within the 10:00–22:00 operating period.
+
+12. Every Series has a one-hour Match Window.
+
+13. All three Games in a Series must occur inside that one-hour window.
+
+14. Check-in opens one hour before the Series.
+
+15. Check-in closes 30 minutes before the Series.
+
+16. The Results Window closes 30 minutes after the Match Window.
+
+17. The scheduler must account for the Season deadline when generating Phase schedules.
+
+18. The scheduler must reject schedules that cannot fit inside the Season lifetime.
+
+19. Manual operator adjustments must obey the same timing constraints.
+
+20. The system must never solve insufficient capacity by generating unrealistic schedules.
+```
+
+---
+
+# 50. Final Architecture
+
+The resulting temporal architecture is:
+
+```text
+                    SEASON
+        ┌───────────────────────────┐
+        │ Start Date                │
+        │ End Date                  │
+        │ Timezone                  │
+        │                           │
+        │ Final Week Reservation    │
+        └─────────────┬─────────────┘
+                      │
+                      ↓
+              COMPETITION PLAN
+                      │
+          ┌───────────┴───────────┐
+          ↓                       ↓
+       PHASE 1                 PHASE 2
+       largest                 smaller
+          │                       │
+       PLOTS                    PLOTS
+          │                       │
+       SERIES                   SERIES
+          │                       │
+       GAMES                    GAMES
+          │                       │
+          └───────────┬───────────┘
+                      ↓
+                FINAL PHASE
+                      │
+                      ↓
+              FINAL WEEK
+                      │
+                      ↓
+             SEASON COMPLETED
+```
+
+The fundamental relationship is:
+
+> **The Season defines the available time. The competition engine divides that time among Phases. The scheduling engine fills each Phase with realistic Series appointments.**
+
+---
+
+# 51. Relationship to NGL Competition & Scheduling Specification v2
+
+This document does not replace the Competition & Scheduling Specification.
+
+Instead:
+
+```text
+NGL Competition & Scheduling Specification v2
+        ↓
+defines competition structure
+
+NGL Season Lifecycle & Competition Timing Model
+        ↓
+defines competition lifetime and temporal constraints
+
+Development Competition Architecture
+        ↓
+defines implementation
+
+Prisma / API / Web
+        ↓
+implements the system
+```
+
+Together they establish the new canonical competition model.
+
+# 52. Implementation Consequence
+
+The replacement competition engine must therefore be designed around:
+
+```text
+Season
+    ↓
+Season Timing
+    ↓
+Phase Planning
+    ↓
+Plot Distribution
+    ↓
+Series Generation
+    ↓
+Series Scheduling
+    ↓
+Game Execution
+    ↓
+Series Resolution
+    ↓
+Advancement
+    ↓
+Next Phase
+    ↓
+Final Phase
+    ↓
+Season Completion
+```
+
+The old assumption:
+
+```text
+Generate all Fixtures
+→ Generate Schedule
+```
+
+is no longer valid.
+
+The system must instead progressively generate and schedule the competition **Phase by Phase**, while continuously checking the remaining Season lifetime.

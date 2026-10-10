@@ -1,0 +1,824 @@
+.page {
+  display: grid;
+  gap: 16px;
+  color: #17211b;
+}
+
+.seasonHeader,
+.actionBar,
+.phaseSummary,
+.capacity,
+.plotList,
+.emptyState,
+.blockers,
+.warnings {
+  border: 1px solid #d8e2da;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.seasonHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px;
+  background: linear-gradient(110deg, #eff6f0, #fff 72%);
+}
+
+.seasonHeader h2,
+.phaseHeading h2,
+.listHeader h3,
+.sectionHeading h3,
+.emptyState h2,
+.plotHeader h4,
+.blockers h3,
+.warnings h3 {
+  margin: 0;
+}
+
+.seasonHeader > div:first-child > p:last-child {
+  margin: 6px 0 0;
+  color: #66736a;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: #a45c37;
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.backLink {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: #17633d;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.seasonTiming {
+  display: grid;
+  gap: 5px;
+  min-width: 230px;
+  padding-left: 18px;
+  border-left: 1px solid #d8e2da;
+}
+
+.seasonTiming span,
+.phaseFacts span {
+  color: #66736a;
+  font-size: 0.72rem;
+}
+
+.seasonTiming strong {
+  font-size: 0.9rem;
+}
+
+.seasonTiming small {
+  color: #66736a;
+}
+
+.workflow {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(85px, 1fr));
+  overflow-x: auto;
+  border: 1px solid #d8e2da;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.workflowStep {
+  display: flex;
+  min-width: 94px;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 10px;
+  border-right: 1px solid #e7ede8;
+  color: #707c73;
+  font-size: 0.71rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workflowStep:last-child {
+  border-right: 0;
+}
+
+.stepNumber {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border: 1px solid #cdd8cf;
+  border-radius: 50%;
+  font-size: 0.67rem;
+}
+
+.done {
+  color: #17633d;
+  background: #f3f8f3;
+}
+
+.done .stepNumber {
+  border-color: #17633d;
+  background: #17633d;
+  color: #fff;
+}
+
+.current {
+  color: #17211b;
+  background: #f5efe5;
+}
+
+.current .stepNumber {
+  border-color: #a45c37;
+  color: #a45c37;
+}
+
+.actionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+}
+
+.actionContext,
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.actionContext > span:last-child {
+  color: #66736a;
+  font-size: 0.78rem;
+}
+
+.lockedState,
+.openState {
+  display: inline-flex;
+  align-items: center;
+  min-height: 27px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.lockedState {
+  background: #e8efe9;
+  color: #405a49;
+}
+
+.openState {
+  background: #f5efe5;
+  color: #8b542f;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 36px;
+  border-radius: 4px;
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.primaryButton {
+  border: 1px solid #17633d;
+  background: #17633d;
+  color: #fff;
+}
+
+.secondaryButton {
+  border: 1px solid #9cb3a1;
+  background: #fff;
+  color: #17633d;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.successMessage,
+.errorMessage {
+  margin: 0;
+  padding: 10px 13px;
+  border-left: 4px solid #17633d;
+  background: #edf5ee;
+  color: #245137;
+  font-size: 0.8rem;
+}
+
+.errorMessage {
+  border-left-color: #a54e30;
+  background: #fbf0eb;
+  color: #853d22;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(100px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #d8e2da;
+  border-radius: 6px;
+  background: #d8e2da;
+}
+
+.metrics > div {
+  display: grid;
+  min-height: 68px;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.metrics span {
+  color: #66736a;
+  font-size: 0.67rem;
+}
+
+.metrics strong {
+  font-size: 0.88rem;
+}
+
+.good {
+  color: #17633d;
+}
+
+.bad {
+  color: #a54e30;
+}
+
+.capacity {
+  padding: 13px 16px;
+  background: #f8faf8;
+}
+
+.sectionHeading,
+.phaseHeading,
+.listHeader,
+.plotHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.sectionHeading > span {
+  color: #17633d;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.capacity > p {
+  margin: 8px 0 0;
+  color: #66736a;
+  font-size: 0.76rem;
+}
+
+.capacity ul,
+.blockers ul,
+.warnings ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 0.78rem;
+}
+
+.phaseNav {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.phaseButton,
+.phaseSelected {
+  display: grid;
+  min-width: 122px;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid #cfd9d1;
+  border-radius: 4px;
+  background: #fff;
+  color: #405047;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phaseSelected {
+  border-color: #17633d;
+  background: #edf5ee;
+  color: #145332;
+}
+
+.phaseButton span,
+.phaseSelected span {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.phaseButton small,
+.phaseSelected small {
+  font-size: 0.68rem;
+}
+
+.phaseSummary {
+  padding: 15px 17px;
+}
+
+.progression {
+  overflow: hidden;
+  border: 1px solid #d8e2da;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.progressionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 16px;
+  border-bottom: 1px solid #e3e9e4;
+}
+
+.progressionHeader h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.progressionTotals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  color: #66736a;
+  font-size: 0.72rem;
+}
+
+.progressionTableWrap {
+  overflow-x: auto;
+}
+
+.progressionTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.progressionTable th,
+.progressionTable td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #e8eee9;
+  font-size: 0.73rem;
+  white-space: nowrap;
+}
+
+.progressionTable th {
+  background: #f5f8f5;
+  color: #66736a;
+  font-size: 0.67rem;
+  font-weight: 750;
+}
+
+.progressionTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.progressionTable td:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.progressionTable td:first-child strong {
+  color: #26382d;
+  font-size: 0.75rem;
+}
+
+.progressionTable td:first-child small {
+  color: #7a867d;
+  font-size: 0.63rem;
+}
+
+.eligible,
+.eliminated,
+.pending {
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.eligible {
+  color: #17633d;
+}
+
+.eliminated {
+  color: #a54e30;
+}
+
+.pending {
+  color: #7b7060;
+}
+
+.phaseFacts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(110px, 1fr));
+  gap: 12px;
+  margin-top: 15px;
+}
+
+.phaseFacts > div {
+  display: grid;
+  gap: 5px;
+}
+
+.phaseFacts strong {
+  font-size: 0.8rem;
+}
+
+.blockers,
+.warnings {
+  padding: 13px 16px;
+}
+
+.blockers {
+  border-left: 4px solid #a54e30;
+  color: #853d22;
+}
+
+.warnings {
+  border-left: 4px solid #ab8434;
+  color: #705b23;
+}
+
+.blockers h3,
+.warnings h3 {
+  font-size: 0.9rem;
+}
+
+.plotList {
+  overflow: hidden;
+}
+
+.listHeader {
+  padding: 13px 16px;
+  border-bottom: 1px solid #e3e9e4;
+}
+
+.listHeader > span {
+  color: #66736a;
+  font-size: 0.76rem;
+}
+
+.plot + .plot {
+  border-top: 1px solid #dfe7e0;
+}
+
+.plotHeader {
+  padding: 12px 16px;
+  background: #f5f8f5;
+}
+
+.plotHeader h4 {
+  margin: 0 0 4px;
+  font-size: 0.88rem;
+}
+
+.plotHeader span {
+  color: #66736a;
+  font-size: 0.7rem;
+}
+
+.plotHeader > span:last-child {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seriesRow {
+  padding: 12px 16px;
+  border-top: 1px solid #edf1ed;
+}
+
+.seriesMain {
+  display: grid;
+  grid-template-columns: minmax(155px, 1.1fr) minmax(230px, 1.4fr) minmax(150px, 0.9fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.attendance {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid #e3e9e4;
+  background: #f8faf8;
+}
+
+.attendanceHeader,
+.executionGate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attendanceHeader > div,
+.attendanceIdentity {
+  display: grid;
+  gap: 4px;
+}
+
+.attendanceHeader strong,
+.attendanceIdentity strong {
+  color: #26382d;
+  font-size: 0.77rem;
+}
+
+.attendanceHeader span,
+.attendanceHeader small,
+.attendanceIdentity span,
+.attendanceIdentity small,
+.executionGate > span {
+  color: #66736a;
+  font-size: 0.69rem;
+}
+
+.attendancePlayers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.attendanceParticipant {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 9px;
+  border-top: 1px solid #e3e9e4;
+}
+
+.attendanceIdentity {
+  min-width: 0;
+}
+
+.attendanceIdentity small {
+  overflow-wrap: anywhere;
+}
+
+.attendanceActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.attendanceException summary {
+  color: #8b542f;
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.attendanceException p {
+  max-width: 320px;
+  margin: 6px 0;
+  color: #805020;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.attendanceException label {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+  color: #66736a;
+  font-size: 0.68rem;
+}
+
+.attendanceException input {
+  min-height: 34px;
+  width: min(240px, 100%);
+  border: 1px solid #cbd7cd;
+  border-radius: 3px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.attendanceException button {
+  margin-top: 7px;
+}
+
+.executionGate {
+  padding-top: 9px;
+  border-top: 1px solid #e3e9e4;
+}
+
+.executionGate > span {
+  font-weight: 750;
+}
+
+.seriesIdentity,
+.seriesAppointment,
+.seriesOutcome {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.seriesIdentity strong,
+.seriesAppointment strong,
+.seriesOutcome strong {
+  font-size: 0.8rem;
+}
+
+.seriesIdentity span,
+.seriesAppointment span,
+.seriesAppointment small,
+.seriesOutcome span {
+  overflow: hidden;
+  color: #66736a;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+}
+
+.executionLink {
+  width: fit-content;
+  color: #17633d;
+  font-size: 0.7rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.seriesAppointment small {
+  white-space: normal;
+}
+
+.adjustment {
+  position: relative;
+}
+
+.adjustment summary,
+.games summary {
+  color: #17633d;
+  font-size: 0.74rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.adjustment label {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: #66736a;
+  font-size: 0.68rem;
+}
+
+.adjustment input {
+  min-height: 34px;
+  width: 100%;
+  border: 1px solid #cbd7cd;
+  border-radius: 3px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.adjustment button {
+  margin-top: 8px;
+}
+
+.readOnly {
+  color: #69756c;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.games {
+  margin-top: 10px;
+}
+
+.gameList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 8px;
+  border: 1px solid #e3e9e4;
+  background: #e3e9e4;
+}
+
+.gameRow {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  background: #fbfcfb;
+}
+
+.gameRow strong {
+  font-size: 0.75rem;
+}
+
+.gameRow span {
+  color: #66736a;
+  font-size: 0.67rem;
+}
+
+.emptyState {
+  padding: 20px;
+}
+
+.emptyState p,
+.emptyInline {
+  margin: 7px 0 0;
+  color: #66736a;
+  font-size: 0.8rem;
+}
+
+.emptyInline {
+  padding: 14px 16px;
+}
+
+@media (max-width: 1000px) {
+  .metrics {
+    grid-template-columns: repeat(4, minmax(100px, 1fr));
+  }
+
+  .phaseFacts {
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .seasonHeader,
+  .actionBar,
+  .phaseHeading,
+  .sectionHeading,
+  .listHeader,
+  .plotHeader,
+  .progressionHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .seasonTiming {
+    min-width: 0;
+    padding: 12px 0 0;
+    border-top: 1px solid #d8e2da;
+    border-left: 0;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+  }
+
+  .phaseFacts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .seriesMain {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .progressionTotals {
+    justify-content: flex-start;
+  }
+
+  .attendancePlayers {
+    grid-template-columns: 1fr;
+  }
+
+  .attendanceParticipant {
+    flex-direction: column;
+  }
+
+  .attendanceHeader,
+  .executionGate {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .plotHeader > span:last-child {
+    max-width: 100%;
+  }
+
+  .gameList {
+    grid-template-columns: 1fr;
+  }
+}

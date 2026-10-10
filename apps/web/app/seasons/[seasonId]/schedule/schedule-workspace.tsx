@@ -129,18 +129,40 @@ export default function ScheduleWorkspace({
   const division = schedule.divisions.find((item) => item.divisionId === divisionId) ?? null;
   const fixtures = fixturePage?.fixtures ?? [];
   const currentConflictCount = validationReport?.summary.conflicts ?? division?.conflictCount;
-  const canGenerate = Boolean(
-    division &&
-    schedule.seasonStatus === 'ROSTER_LOCKED' &&
-    division.active &&
-    !division.scheduleLocked &&
-    division.generationStatus === 'NOT_GENERATED',
-  );
-  const canLock = Boolean(
-    division &&
-    schedule.seasonStatus === 'ROSTER_LOCKED' &&
-    division.active &&
-    !division.scheduleLocked &&
+ const fixturesReady = Boolean(
+  division &&
+  division.generationStatus === 'GENERATED' &&
+  division.expectedFixtureCount > 0 &&
+  division.currentFixtureCount === division.expectedFixtureCount,
+);
+
+const scheduleComplete = Boolean(
+  division &&
+  division.currentFixtureCount > 0 &&
+  division.scheduledFixtureCount === division.currentFixtureCount &&
+  division.unscheduledFixtureCount === 0,
+);
+
+const scheduleStarted = Boolean(
+  division &&
+  division.scheduledFixtureCount > 0,
+);
+
+const canGenerate = Boolean(
+  division &&
+  schedule.seasonStatus === 'ROSTER_LOCKED' &&
+  division.active &&
+  !division.scheduleLocked &&
+  fixturesReady &&
+  !scheduleComplete,
+);
+ const canLock = Boolean(
+  division &&
+  schedule.seasonStatus === 'ROSTER_LOCKED' &&
+  division.active &&
+  !division.scheduleLocked &&
+  fixturesReady &&
+  scheduleComplete &&
     !division.scheduleValidationRequired &&
     division.generationStatus === 'GENERATED' &&
     division.currentFixtureCount === division.expectedFixtureCount &&
@@ -151,7 +173,7 @@ export default function ScheduleWorkspace({
     currentConflictCount === 0 &&
     (validationReport === null || validationReport.valid),
   );
-  const scheduleGenerated = Boolean(division && division.scheduledFixtureCount > 0);
+  const scheduleGenerated = scheduleComplete;
   const scheduleValid = canLock;
 
   async function loadDivision(nextDivisionId: string, nextPage: number) {

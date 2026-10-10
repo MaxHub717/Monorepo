@@ -92,7 +92,20 @@ export type PlayerStatus =
   | 'ARCHIVED';
 
 export type PenaltyType =
-  'WARNING' | 'FORFEIT' | 'POINT_DEDUCTION' | 'SUSPENSION' | 'BAN';
+  'WARNING' | 'FORFEIT' | 'POINT_DEDUCTION' | 'SUSPENSION' | 'BAN' | 'DISQUALIFICATION';
+
+export type PenaltyScopeType = 'PLAYER' | 'CLUB' | 'MATCH' | 'SEASON' | 'PHASE' | 'PLOT' | 'SERIES' | 'GAME';
+
+export type PenaltyEffectType =
+  | 'NONE'
+  | 'POINTS_DEDUCTION'
+  | 'GAME_FORFEIT'
+  | 'SERIES_FORFEIT'
+  | 'EXECUTION_BLOCK'
+  | 'ADVANCEMENT_EXCLUSION'
+  | 'COMPETITION_DISQUALIFICATION';
+
+export type PenaltyEffectStatus = 'NOT_APPLICABLE' | 'DECLARED_NOT_APPLIED' | 'APPLIED' | 'EXPIRED' | 'REVOKED';
 
 export type RoleName = 'PLAYER' | 'CLUB_MANAGER' | 'OPERATOR' | 'COMMISSIONER' | 'HQ_ADMIN';
 

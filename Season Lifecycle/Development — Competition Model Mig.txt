@@ -1,0 +1,2038 @@
+Development — Competition Model Migration
+
+## Old Schema/API → Phase / Plot / Series / Game
+
+**Status:** Canonical Development Mapping
+**Applies to:** NGL Competition & Scheduling Engine v2
+**Purpose:** Define how the existing league implementation maps to the new competition model and identify what is retained, transformed, deprecated, or replaced.
+
+---
+
+# 1. Purpose
+
+The current NGL implementation was built around:
+
+```text
+Season
+└── Division
+    ├── DivisionParticipant
+    ├── MatchWeek
+    ├── Fixture
+    │   └── Match
+    │       └── MatchResult
+    └── StandingsRow
+```
+
+The new competition model is:
+
+```text
+Season
+└── Phase
+    └── Plot
+        └── Series
+            ├── Game 1
+            ├── Game 2
+            └── Game 3
+                 ↓
+              Result
+                 ↓
+            Advancement
+```
+
+The new model treats the **Series** as the competitive and scheduling unit.
+
+A Fixture is no longer the primary competition object.
+
+A Match is no longer the container for the complete player-v-player competition.
+
+A Series contains exactly three Games, and the Series determines advancement.
+
+---
+
+# 2. Current Repository Baseline
+
+The current Prisma schema contains the following competition-related models:
+
+```text
+Season
+Division
+DivisionParticipant
+MatchWeek
+Fixture
+Match
+MatchParticipant
+MatchResult
+StandingsRow
+Dispute
+Penalty
+```
+
+The current `Division` model contains legacy competition-format fields including:
+
+```text
+format
+capacity
+registration_capacity
+competition_participant_count
+scheduling_period_days
+matches_per_participant
+match_window_start_minutes
+match_window_end_minutes
+match_window_timezone
+concurrent_matches
+schedule_locked
+schedule_validation_required
+```
+
+The current `Fixture` model contains:
+
+```text
+fixture_number
+scheduling_period_number
+concurrency_slot
+home_player_id
+away_player_id
+scheduled_at
+scheduled_timezone
+check_in_opens_at
+check_in_closes_at
+play_window_opens_at
+play_window_closes_at
+scheduling_status
+schedule_key
+status
+```
+
+The current `Match` model contains:
+
+```text
+fixture_id
+season_id
+division_id
+status
+started_at
+ended_at
+```
+
+The current `MatchResult` represents one aggregate result:
+
+```text
+home_score
+away_score
+winner_player_id
+submitted_at
+confirmed_at
+```
+
+This structure was appropriate for the previous fixture/match model but is not sufficient as the canonical implementation of the new Phase/Plot/Series/Game model.
+
+---
+
+# 3. Canonical Target Domain
+
+The target hierarchy is:
+
+```text
+Season
+│
+├── SeasonRuleset
+│
+├── Division
+│
+└── Competition
+    │
+    ├── Phase 1
+    │   ├── Plot 1
+    │   │   ├── Series
+    │   │   │   ├── Game 1
+    │   │   │   ├── Game 2
+    │   │   │   └── Game 3
+    │   │   └── Series
+    │   └── Plot 2
+    │
+    ├── Phase 2
+    │   ├── Plot 1
+    │   └── Plot 2
+    │
+    └── ...
+```
+
+The competition hierarchy is therefore:
+
+```text
+Season
+→ Phase
+→ Plot
+→ Series
+→ Game
+→ Game Result
+→ Series Resolution
+→ Advancement
+```
+
+This follows the new competition specification, where phases are determined by the competing field and plots dynamically distribute players. The source competition notes explicitly define phases, plots, three-game advancement, and the one-hour match window.
+
+---
+
+# 4. Old → New Mapping
+
+## 4.1 Season
+
+### Current
+
+```text
+Season
+```
+
+### Target
+
+```text
+Season
+├── ruleset
+├── phases
+└── competition configuration
+```
+
+### Action
+
+**KEEP + EXTEND**
+
+The existing `Season` remains the top-level competition container.
+
+Do not create a new top-level Tournament object merely to support phases.
+
+The Season already represents the correct lifecycle boundary.
+
+### Existing fields that remain relevant
+
+```text
+id
+league_id
+name
+description
+status
+start_date
+end_date
+registration_open_at
+registration_close_at
+```
+
+### New responsibilities
+
+Season becomes responsible for:
+
+* competition ruleset reference;
+* competition lifecycle;
+* phase configuration;
+* competition initialization;
+* phase progression;
+* final champion;
+* competition completion.
+
+### Important change
+
+The existing:
+
+```text
+ACTIVE
+PLAYOFFS
+```
+
+lifecycle should not be interpreted as the new Phase model.
+
+A Phase is a competition-domain object inside an active season.
+
+---
+
+# 5. Division
+
+## Current
+
+```text
+Season
+└── Division
+```
+
+Division currently contains most of the competition configuration.
+
+It also contains legacy assumptions around:
+
+```text
+ROUND_ROBIN_SINGLE
+ROUND_ROBIN_DOUBLE
+```
+
+### Target
+
+```text
+Season
+└── Division
+    └── Competition
+        ├── Phase
+        ├── Plot
+        └── Series
+```
+
+### Action
+
+**KEEP + SIMPLIFY + EXTEND**
+
+Division remains useful because the platform supports multiple divisions.
+
+However, Division should stop being the place where the competition engine is hardcoded around round robin.
+
+### Retire from competition logic
+
+```text
+CompetitionFormat.ROUND_ROBIN_SINGLE
+CompetitionFormat.ROUND_ROBIN_DOUBLE
+```
+
+These should no longer control NGL's canonical competition generation.
+
+They may be retained temporarily for migration compatibility, but new competition logic must not depend on them.
+
+### New Division responsibilities
+
+Division defines:
+
+* participant pool;
+* competition capacity;
+* competition ruleset;
+* competition configuration;
+* active/inactive status.
+
+The actual progression structure belongs to Phase.
+
+---
+
+# 6. DivisionParticipant
+
+## Current
+
+```text
+DivisionParticipant
+```
+
+This is currently the authoritative relationship between a player and a division.
+
+It contains:
+
+```text
+status
+competition_selected
+seed
+registered_at
+```
+
+### Target
+
+Keep this as the **registration/eligibility layer**.
+
+Add a separate competition-participation layer.
+
+Conceptually:
+
+```text
+DivisionParticipant
+        │
+        ↓
+CompetitionParticipant
+        │
+        ↓
+PhaseParticipant
+        │
+        ↓
+PlotParticipant
+```
+
+### Action
+
+**KEEP + EXTEND**
+
+Do not overload `DivisionParticipant` with phase-specific state.
+
+A player can:
+
+```text
+register once
+↓
+enter Phase 1
+↓
+advance
+↓
+enter Phase 2
+↓
+advance
+↓
+enter Phase 3
+```
+
+Therefore phase participation must be represented separately.
+
+---
+
+# 7. MatchWeek
+
+## Current
+
+```text
+MatchWeek
+```
+
+It exists primarily to group Fixtures into weekly scheduling units.
+
+This came from the previous scheduling model.
+
+### Target
+
+```text
+Phase
+└── Series
+    └── scheduled_at
+```
+
+### Action
+
+**RETIRE from competition scheduling**
+
+Do not create a new `MatchWeek` equivalent.
+
+The new model does not require the competition to be divided into fixed weekly rounds.
+
+Phase duration is calculated from:
+
+* number of players;
+* number of Series;
+* scheduling capacity;
+* available scheduling windows.
+
+Therefore:
+
+```text
+MatchWeek
+```
+
+must not remain the authoritative scheduling container.
+
+Historical rows may be preserved during migration.
+
+---
+
+# 8. Fixture
+
+## Current
+
+```text
+Fixture
+├── home_player_id
+├── away_player_id
+├── fixture_number
+├── match_week_id
+├── scheduled_at
+├── scheduling fields
+└── status
+```
+
+### Target
+
+```text
+Series
+├── phase_id
+├── plot_id
+├── player_a_id
+├── player_b_id
+├── scheduled_at
+├── timezone
+├── check_in_opens_at
+├── check_in_closes_at
+├── match_window_closes_at
+├── results_window_closes_at
+└── status
+```
+
+### Action
+
+**REPLACE**
+
+Fixture should not remain the canonical competition object.
+
+The conceptual mapping is:
+
+```text
+Fixture
+    ↓
+Series
+```
+
+But this is a **domain transformation**, not simply a database rename.
+
+A Series must additionally know:
+
+* which Phase it belongs to;
+* which Plot it belongs to;
+* which competition ruleset applies;
+* which three Games belong to it;
+* its advancement outcome;
+* whether it resolved successfully;
+* whether either player was eliminated;
+* whether a draw caused dual elimination.
+
+---
+
+# 9. Fixture Number
+
+## Current
+
+```text
+fixture_number
+```
+
+### Target
+
+```text
+series_number
+```
+
+### Action
+
+**RENAME / REINTERPRET**
+
+The numbering should become a Series identifier within the relevant competition scope.
+
+Do not preserve "fixture" terminology in new APIs.
+
+---
+
+# 10. Match
+
+## Current
+
+```text
+Match
+└── Fixture
+```
+
+The current Match is essentially the operational execution object for one Fixture.
+
+### Target
+
+```text
+Series
+└── Game
+```
+
+### Action
+
+**REPLACE / SPLIT**
+
+The existing Match responsibilities must be divided between:
+
+```text
+Series
+Game
+```
+
+### Series owns
+
+* players;
+* Phase;
+* Plot;
+* schedule;
+* check-in;
+* match window;
+* results window;
+* overall series status;
+* series resolution;
+* advancement.
+
+### Game owns
+
+* game number;
+* game status;
+* game start/end;
+* individual game result;
+* winner;
+* draw state;
+* result submission;
+* result verification.
+
+---
+
+# 11. MatchParticipant
+
+## Current
+
+```text
+MatchParticipant
+├── player_id
+└── role
+```
+
+### Target
+
+There are two possible relationships:
+
+```text
+SeriesParticipant
+```
+
+and
+
+```text
+GameParticipant
+```
+
+However, because a Series always has exactly two players and Games inherit those players, the preferred MVP design is:
+
+```text
+Series
+├── player_a_id
+└── player_b_id
+```
+
+with Games referencing the Series.
+
+### Action
+
+**SIMPLIFY / REPLACE**
+
+Do not introduce unnecessary participant tables if the Series always has exactly two players.
+
+If future competition formats require more than two competitors in one Series, the participant table can be introduced later.
+
+---
+
+# 12. MatchResult
+
+## Current
+
+```text
+MatchResult
+├── home_score
+├── away_score
+└── winner_player_id
+```
+
+### Target
+
+Replace the single aggregate MatchResult with:
+
+```text
+GameResult
+```
+
+and:
+
+```text
+SeriesResult
+```
+
+### GameResult
+
+Represents one game:
+
+```text
+Game
+├── player_a_score
+├── player_b_score
+├── winner_player_id
+└── draw
+```
+
+### SeriesResult
+
+Represents the completed Series:
+
+```text
+SeriesResult
+├── player_a_game_wins
+├── player_b_game_wins
+├── games_completed
+├── series_winner_id
+├── unresolved
+├── dual_elimination
+└── resolved_at
+```
+
+### Action
+
+**REPLACE**
+
+---
+
+# 13. Game
+
+## New model
+
+```text
+Game
+```
+
+This is a completely new competition-domain entity.
+
+Each Series creates exactly:
+
+```text
+Game 1
+Game 2
+Game 3
+```
+
+### Required relationships
+
+```text
+Game
+→ Series
+→ Phase
+→ Plot
+→ Division
+→ Season
+```
+
+### Minimum game fields
+
+Conceptually:
+
+```text
+id
+series_id
+game_number
+status
+started_at
+ended_at
+player_a_score
+player_b_score
+winner_player_id
+is_draw
+result_submitted_at
+result_confirmed_at
+```
+
+The exact Prisma schema should be finalized during the schema implementation ticket rather than duplicated across several tickets.
+
+---
+
+# 14. Series Resolution
+
+The current Match state machine cannot be used as the complete Series resolution engine.
+
+The new flow is:
+
+```text
+Game 1
+   ↓
+Game 2
+   ↓
+Game 3
+   ↓
+Series Resolution
+   ↓
+Advance / Eliminate
+```
+
+### Normal result
+
+```text
+2–1
+```
+
+Winner advances.
+
+### Draw rule
+
+If **any Game is a draw**:
+
+```text
+Player A → ELIMINATED
+Player B → ELIMINATED
+Series → DUAL_ELIMINATION
+```
+
+This applies even if the other games would otherwise produce a 2–1 result.
+
+### Unresolved Series
+
+If the Series cannot produce a valid winner:
+
+```text
+Series → UNRESOLVED
+Player A → ELIMINATED
+Player B → ELIMINATED
+```
+
+This is a competition rule, not merely an operational Match status.
+
+---
+
+# 15. Phase
+
+## New model
+
+```text
+Phase
+```
+
+This becomes the primary competition progression object.
+
+### Responsibilities
+
+A Phase defines:
+
+* phase number;
+* phase name;
+* phase status;
+* participant pool;
+* plot count;
+* plots;
+* Series;
+* duration;
+* completion state;
+* advancement state.
+
+### Example
+
+```text
+Phase 1
+Phase 2
+Phase 3
+Phase 4
+...
+```
+
+The number of phases is determined dynamically by the competition field and actual advancement results.
+
+---
+
+# 16. Plot
+
+## New model
+
+```text
+Plot
+```
+
+A Plot replaces the conceptual role previously played by a group or manually partitioned field.
+
+### Responsibilities
+
+A Plot defines:
+
+* phase;
+* plot number;
+* participating players;
+* Series generated within the plot.
+
+### Important rule
+
+A Plot does not have a fixed permanent capacity.
+
+Its player count is determined by the available players in that Phase.
+
+Therefore:
+
+```text
+Plot 1 = 20
+Plot 2 = 20
+Plot 3 = 20
+Plot 4 = 20
+Plot 5 = 20
+```
+
+may occur in Phase 1.
+
+Then:
+
+```text
+Plot 1 = 10
+Plot 2 = 12
+Plot 3 = 12
+```
+
+may occur in Phase 2.
+
+This is supported by the supplied competition model.
+
+---
+
+# 17. PhaseParticipant
+
+A new Phase-specific participation record is required.
+
+Conceptually:
+
+```text
+PhaseParticipant
+```
+
+It records:
+
+```text
+phase_id
+player_id
+source_phase_participant_id
+seed
+plot_id
+status
+outcome
+advanced
+eliminated
+```
+
+This is important because a player does not permanently belong to a Plot.
+
+Instead:
+
+```text
+Phase 1
+Player A → Plot 2
+       ↓
+wins Series
+       ↓
+Phase 2
+Player A → Plot 1
+```
+
+Plot membership is therefore **phase-specific**.
+
+---
+
+# 18. Advancement
+
+Advancement should not be inferred from standings.
+
+It should be an explicit competition-domain operation.
+
+Conceptually:
+
+```text
+SeriesResult
+      ↓
+SeriesResolution
+      ↓
+Advancement
+      ↓
+Next Phase Participant Pool
+```
+
+An advancement record should capture:
+
+```text
+source_series_id
+player_id
+source_phase_id
+target_phase_id
+outcome
+created_at
+```
+
+This gives the system an auditable progression history.
+
+---
+
+# 19. StandingsRow
+
+## Current
+
+```text
+StandingsRow
+├── games_played
+├── wins
+├── draws
+├── losses
+├── goals_for
+├── goals_against
+├── points
+└── ranking
+```
+
+### Problem
+
+These fields were designed for a standings/league table.
+
+The new competition model is advancement-based.
+
+There is no traditional round-robin standings table driving qualification.
+
+### Target
+
+Replace the central role of:
+
+```text
+StandingsRow
+```
+
+with:
+
+```text
+PhaseParticipant
+SeriesResult
+Advancement
+```
+
+### Action
+
+**DEPRECATE as competition progression authority**
+
+It may remain for:
+
+* statistics;
+* historical records;
+* future league formats;
+* reporting.
+
+But it must not determine who advances in the NGL Phase/Plot/Series model.
+
+---
+
+# 20. Scheduling Mapping
+
+The scheduling model also changes significantly.
+
+## Current
+
+```text
+Fixture
+→ scheduled_at
+→ scheduling period
+→ concurrency slot
+→ check-in
+→ play window
+```
+
+## Target
+
+```text
+Series
+→ scheduled_at
+→ timezone
+→ check-in window
+→ match window
+→ results window
+```
+
+The Series becomes the scheduling unit.
+
+---
+
+# 21. Canonical Series Schedule
+
+For a Series scheduled at `T`:
+
+```text
+T - 60 min
+    Check-in opens
+
+T - 30 min
+    Check-in closes
+
+T
+    Series match window opens
+
+T + 60 min
+    Series match window closes
+
+T + 90 min
+    Results window closes
+```
+
+All three Games must occur inside:
+
+```text
+T → T + 60 minutes
+```
+
+The expected completed Game count is:
+
+```text
+3
+```
+
+This replaces the earlier scheduling model based on weekly scheduling periods and individual Fixture windows.
+
+---
+
+# 22. Scheduling Fields
+
+### Retain conceptually
+
+```text
+scheduled_at
+scheduled_timezone
+check_in_opens_at
+check_in_closes_at
+```
+
+### Replace
+
+```text
+play_window_opens_at
+play_window_closes_at
+```
+
+with explicit Series terminology:
+
+```text
+match_window_opens_at
+match_window_closes_at
+results_window_closes_at
+```
+
+### Retire from the new competition model
+
+```text
+scheduling_period_number
+concurrency_slot
+match_week_id
+```
+
+These were created for the old weekly-density scheduler and should not become permanent dependencies of the new engine.
+
+---
+
+# 23. Match State Machine
+
+The existing Match state machine is valuable and should not simply be deleted.
+
+It should be split into:
+
+```text
+Series State Machine
+```
+
+and:
+
+```text
+Game State Machine
+```
+
+## Series states
+
+Conceptually:
+
+```text
+SCHEDULED
+CHECK_IN_OPEN
+CHECK_IN_CLOSED
+READY
+IN_PROGRESS
+AWAITING_GAMES
+RESULTS_PENDING
+UNDER_REVIEW
+COMPLETED
+DISPUTED
+CANCELLED
+FORFEITED
+VOID
+```
+
+## Game states
+
+Conceptually:
+
+```text
+SCHEDULED
+IN_PROGRESS
+RESULT_SUBMITTED
+UNDER_REVIEW
+COMPLETED
+DISPUTED
+VOID
+```
+
+The exact canonical enum should be defined once in the new competition domain and reused by API/UI.
+
+---
+
+# 24. Disputes
+
+## Current
+
+```text
+Dispute
+→ Match
+```
+
+### Target
+
+A dispute may concern:
+
+```text
+Series
+```
+
+or:
+
+```text
+Game
+```
+
+Therefore the model should no longer require a Match as the only competition target.
+
+### Action
+
+**EXTEND**
+
+The dispute domain should support:
+
+```text
+series_id
+game_id
+```
+
+with exactly one authoritative target where appropriate.
+
+---
+
+# 25. Penalties
+
+## Current
+
+```text
+Penalty
+→ Match
+→ Player
+→ Club
+→ Dispute
+```
+
+### Target
+
+Penalty remains a cross-domain operational object.
+
+It should support:
+
+```text
+Season
+Phase
+Series
+Game
+Player
+Club
+Dispute
+```
+
+depending on the reason for the penalty.
+
+### Action
+
+**EXTEND**
+
+Do not make penalties part of the competition generation engine itself.
+
+The competition engine consumes the resulting eligibility/outcome state.
+
+---
+
+# 26. Audit and Outbox
+
+The current:
+
+```text
+AuditLog
+OutboxEvent
+```
+
+foundation should be retained.
+
+It becomes even more important because Phase progression is stateful and irreversible.
+
+New domain events should include concepts such as:
+
+```text
+PHASE_CREATED
+PLOT_CREATED
+SERIES_CREATED
+GAME_CREATED
+SERIES_SCHEDULED
+SERIES_CHECK_IN_OPENED
+SERIES_STARTED
+GAME_RESULT_SUBMITTED
+GAME_RESULT_CONFIRMED
+SERIES_RESOLVED
+PLAYER_ADVANCED
+PLAYER_ELIMINATED
+PHASE_COMPLETED
+NEXT_PHASE_CREATED
+SEASON_COMPLETED
+```
+
+The database remains authoritative.
+
+Realtime consumers receive events from the outbox.
+
+---
+
+# 27. API Mapping
+
+## Current API domain
+
+The current API has a substantial Fixture/Match surface.
+
+Conceptually:
+
+```text
+/fixtures
+/matches
+/results
+/seasons
+/divisions
+```
+
+## Target API domain
+
+The canonical competition API becomes:
+
+```text
+/seasons
+/divisions
+/phases
+/plots
+/series
+/games
+/advancements
+```
+
+### Example hierarchy
+
+```text
+GET
+/seasons/:seasonId/divisions/:divisionId/phases
+```
+
+```text
+GET
+/seasons/:seasonId/divisions/:divisionId/phases/:phaseId/plots
+```
+
+```text
+GET
+/phases/:phaseId/series
+```
+
+```text
+GET
+/series/:seriesId
+```
+
+```text
+GET
+/series/:seriesId/games
+```
+
+```text
+POST
+/games/:gameId/result
+```
+
+```text
+POST
+/series/:seriesId/resolve
+```
+
+```text
+POST
+/phases/:phaseId/generate-next
+```
+
+These are **target API concepts**, not claims that these routes already exist.
+
+They should be implemented from the new domain model rather than retrofitting the old Fixture routes indefinitely.
+
+---
+
+# 28. Existing API Modules
+
+## Season module
+
+```text
+KEEP
+```
+
+Expand it to orchestrate competition lifecycle.
+
+---
+
+## Fixture module
+
+```text
+MIGRATE → Series module
+```
+
+The existing Fixture service contains valuable generation, validation, scheduling and locking patterns.
+
+Those patterns should be extracted/reused rather than blindly copied.
+
+The new module should become:
+
+```text
+competition/
+  phase/
+  plot/
+  series/
+  game/
+  scheduling/
+  advancement/
+```
+
+or an equivalent modular structure consistent with the existing NestJS architecture.
+
+---
+
+## Match module
+
+```text
+MIGRATE → Series + Game
+```
+
+The current Match service contains useful state-machine logic.
+
+Move the reusable transition principles into the new Series/Game domain.
+
+---
+
+## Result handling
+
+```text
+MatchResult
+    ↓
+GameResult
+    ↓
+SeriesResolution
+```
+
+Result handling must therefore become two-level:
+
+```text
+Game result
+```
+
+followed by:
+
+```text
+Series result
+```
+
+---
+
+# 29. Web Application Mapping
+
+## Current
+
+The current administrative UI contains:
+
+```text
+Season Workspace
+Participants
+Roster Review
+Schedule Workspace
+Fixture listing
+```
+
+### Target
+
+Replace the competition scheduling workspace with:
+
+```text
+Competition Workspace
+│
+├── Competition Overview
+├── Phase 1
+│   ├── Plot 1
+│   ├── Plot 2
+│   └── ...
+│
+├── Current Series
+├── Games
+├── Schedule
+├── Results
+├── Advancement
+└── Audit
+```
+
+The existing Schedule Workspace should be retained only as an implementation starting point.
+
+It should no longer present the operator with a list of Fixtures as the fundamental competition object.
+
+---
+
+# 30. Admin Workflow Mapping
+
+## Old
+
+```text
+Lock Roster
+↓
+Generate Fixtures
+↓
+Generate Schedule
+↓
+Validate Schedule
+↓
+Lock Schedule
+↓
+Activate Season
+```
+
+## New
+
+```text
+Close Registration
+↓
+Lock Competition Field
+↓
+Create Phase 1
+↓
+Create Plots
+↓
+Generate Series
+↓
+Generate 3 Games per Series
+↓
+Generate Series Schedule
+↓
+Validate Schedule
+↓
+Lock Phase Schedule
+↓
+Start Phase
+↓
+Execute Series
+↓
+Resolve Series
+↓
+Finalize Advancement
+↓
+Create Next Phase
+↓
+Repeat
+↓
+Complete Season
+```
+
+This is the core workflow change.
+
+---
+
+# 31. Migration of ADM-011 Fixture Generation
+
+ADM-011 currently generates:
+
+```text
+Fixture
+```
+
+from a locked division roster.
+
+This ticket must be superseded.
+
+### Old
+
+```text
+Roster
+↓
+Round-robin pairings
+↓
+Fixture rows
+```
+
+### New
+
+```text
+Competition Field
+↓
+Phase 1
+↓
+Plot Distribution
+↓
+Series Pairings
+↓
+3 Games per Series
+```
+
+Therefore the existing Fixture Generation Engine should not be extended to support the new model.
+
+It should be replaced by:
+
+```text
+Phase Generation Engine
++
+Plot Distribution Engine
++
+Series Generation Engine
++
+Game Generation Engine
+```
+
+---
+
+# 32. Migration of ADM-012 Scheduling Density
+
+The previous ADM-012/SD implementation introduced:
+
+```text
+scheduling_period_days
+matches_per_participant
+concurrent_matches
+scheduling_period_number
+concurrency_slot
+```
+
+These were designed around the previous competition model.
+
+### Action
+
+**SUPERSEDE**
+
+Do not carry these concepts into the new canonical competition model unless a future scheduling requirement independently requires them.
+
+The new scheduling engine should calculate:
+
+```text
+Series count
++
+available scheduling capacity
++
+phase duration
+=
+required phase schedule
+```
+
+---
+
+# 33. Migration of ADM-013/014 Schedule Workspace
+
+### Existing work
+
+The existing Schedule Workspace and schedule validation work are valuable foundations.
+
+### Action
+
+**REFACTOR**
+
+Retain:
+
+* permission enforcement;
+* server-side authenticated data fetching;
+* pagination;
+* schedule generation workflow;
+* validation;
+* locking;
+* audit;
+* operator adjustment;
+* actionable API errors.
+
+Replace the competition object displayed by the workspace:
+
+```text
+Fixture
+```
+
+with:
+
+```text
+Series
+```
+
+---
+
+# 34. Migration of ADM-015 Match State Machine
+
+ADM-015 should not be discarded.
+
+### Reuse
+
+Retain the architectural principles:
+
+* server-authoritative transitions;
+* protected transitions;
+* actor/reason tracking;
+* correlation IDs;
+* audit/outbox;
+* check-in enforcement;
+* result lifecycle.
+
+### Change
+
+The state machine becomes:
+
+```text
+Series state machine
++
+Game state machine
+```
+
+rather than one Match state machine.
+
+---
+
+# 35. Data Ownership
+
+The new system should follow these ownership rules:
+
+```text
+Season
+    owns competition lifecycle
+
+Division
+    owns participant pool/configuration
+
+Phase
+    owns progression stage
+
+Plot
+    owns temporary phase grouping
+
+Series
+    owns player-v-player competition
+
+Game
+    owns individual game execution/result
+
+SeriesResolution
+    owns advancement outcome
+
+Advancement
+    owns movement into the next phase
+```
+
+No object should infer another object's responsibilities merely because the old schema did so.
+
+---
+
+# 36. What Must Not Be Carried Forward
+
+The new competition engine must not depend on:
+
+```text
+ROUND_ROBIN_SINGLE
+ROUND_ROBIN_DOUBLE
+MatchWeek
+fixture_number
+fixture generation by round-robin
+one fixture = one complete competition
+MatchResult as the complete result
+StandingsRow as advancement authority
+weekly scheduling periods
+one match per participant per week
+fixed eight-player assumptions
+fixed seven-round assumptions
+```
+
+These are legacy assumptions or implementation artifacts of the previous model.
+
+---
+
+# 37. What Can Be Reused
+
+The following existing foundations should be preserved wherever practical:
+
+```text
+User
+PlayerProfile
+League
+LeagueOperator
+Season
+Division
+DivisionParticipant
+
+Authentication
+Authorization
+Permissions
+Operator scope
+
+AuditLog
+OutboxEvent
+IdempotencyKey
+
+Dispute
+Penalty
+Notification
+
+Docker
+Prisma
+PostgreSQL
+Redis
+
+NestJS module structure
+Next.js application structure
+```
+
+The existing scheduling and Match services should also be mined for reusable implementation patterns before replacement.
+
+---
+
+# 38. Target Relationship Diagram
+
+The resulting competition domain should conceptually become:
+
+```text
+Season
+  │
+  ├── Division
+  │     │
+  │     └── DivisionParticipant
+  │
+  ├── SeasonRuleset
+  │
+  └── Phase
+        │
+        ├── PhaseParticipant
+        │      │
+        │      └── Plot
+        │
+        └── Plot
+              │
+              └── Series
+                    │
+                    ├── Player A
+                    ├── Player B
+                    │
+                    ├── Game 1
+                    ├── Game 2
+                    └── Game 3
+                           │
+                           ↓
+                     Series Resolution
+                           │
+                    ┌──────┴──────┐
+                    ↓             ↓
+                Advanced      Eliminated
+                    │
+                    ↓
+              Next Phase Pool
+```
+
+---
+
+# 39. Migration Strategy
+
+Do not perform a destructive rename of the current database immediately.
+
+Use a staged migration.
+
+## Stage 1 — Introduce new domain tables
+
+Create:
+
+```text
+season_rulesets
+phases
+plots
+phase_participants
+series
+games
+game_results
+series_results
+advancements
+```
+
+Exact names are subject to final schema review.
+
+## Stage 2 — Build new services
+
+Implement:
+
+```text
+PhaseService
+PlotService
+SeriesService
+GameService
+AdvancementService
+CompetitionScheduleService
+```
+
+## Stage 3 — Build new APIs
+
+Expose the new Phase/Plot/Series/Game domain.
+
+## Stage 4 — Build new admin workspace
+
+Replace Fixture-centric UI with Competition/Phase/Series UI.
+
+## Stage 5 — Run Season 1 on new engine
+
+The new engine becomes the authoritative competition system.
+
+## Stage 6 — Retire legacy Fixture/Match engine
+
+Only after:
+
+* data migration is verified;
+* E2E competition tests pass;
+* Season 1 workflow is verified;
+* no active process depends on legacy Fixture/Match generation.
+
+---
+
+# 40. Legacy Data Strategy
+
+Existing records should not be silently deleted.
+
+The migration should classify them as:
+
+```text
+LEGACY_ACTIVE
+LEGACY_MIGRATED
+LEGACY_ARCHIVED
+```
+
+Existing Season 1 data generated under the old Fixture model should be treated as legacy test/competition data unless explicitly migrated into the new competition model.
+
+The new engine must not assume that an old Fixture can automatically become a valid Series.
+
+A conversion is required because:
+
+```text
+Fixture
+```
+
+currently represents one player-v-player appointment,
+
+while:
+
+```text
+Series
+```
+
+represents:
+
+```text
+3 Games
++
+Series Result
++
+Advancement
+```
+
+---
+
+# 41. Development Ticket Dependency Order
+
+The new implementation should proceed in this order:
+
+```text
+COMP-001
+Competition Domain & Rules Foundation
+        ↓
+COMP-002
+Phase Generation
+        ↓
+COMP-003
+Plot Generation & Distribution
+        ↓
+COMP-004
+Series Generation
+        ↓
+COMP-005
+Odd Field Normalization
+        ↓
+COMP-006
+Game Generation & Result Model
+        ↓
+COMP-007
+Series Resolution & Advancement
+        ↓
+COMP-008
+Phase Transition
+        ↓
+COMP-009
+Series Scheduling
+        ↓
+COMP-010
+Check-In & Match Window
+        ↓
+COMP-011
+Schedule Validation
+        ↓
+COMP-012
+Phase Duration Calculation
+        ↓
+COMP-013
+Competition Workspace
+        ↓
+COMP-014
+Season Rules Administration
+        ↓
+COMP-015
+Legacy Fixture/Match Retirement
+        ↓
+COMP-016
+Full Competition E2E Verification
+```
+
+The ADM-016–032 operational backlog should then be rewritten to consume this new engine rather than continue extending the legacy Fixture/Match model.
+
+---
+
+# 42. Canonical Development Principle
+
+The most important implementation rule is:
+
+> **Do not make the new Phase/Plot/Series/Game model a UI abstraction over the existing Fixture/Match schema.**
+
+The new model must exist in the backend domain and database.
+
+The API, admin UI, scheduling engine, result engine, advancement engine, audit system and notifications should all operate against the new domain.
+
+The old Fixture/Match implementation becomes a migration source and compatibility layer during transition—not the hidden foundation underneath the new system.
+
+---
+
+# 43. Final Mapping Summary
+
+| Current                   | Target                             | Action                             |
+| ------------------------- | ---------------------------------- | ---------------------------------- |
+| Season                    | Season                             | Keep + extend                      |
+| Division                  | Division                           | Keep + simplify                    |
+| DivisionParticipant       | DivisionParticipant                | Keep                               |
+| MatchWeek                 | —                                  | Retire                             |
+| Fixture                   | Series                             | Replace                            |
+| fixture_number            | series_number                      | Rename/reinterpret                 |
+| Match                     | Series + Game                      | Split                              |
+| MatchParticipant          | Series players / Game participants | Simplify                           |
+| MatchResult               | GameResult + SeriesResult          | Replace                            |
+| StandingsRow              | PhaseParticipant + Advancement     | Deprecate as progression authority |
+| Fixture scheduling fields | Series scheduling fields           | Transform                          |
+| Match state machine       | Series + Game state machines       | Split                              |
+| Dispute → Match           | Dispute → Series/Game              | Extend                             |
+| Penalty → Match           | Penalty → Series/Game/Phase        | Extend                             |
+| AuditLog                  | AuditLog                           | Keep                               |
+| OutboxEvent               | OutboxEvent                        | Keep + new events                  |
+| Round-robin generator     | Phase/Plot/Series generator        | Replace                            |
+| Weekly scheduling         | Phase scheduling                   | Replace                            |
+| Fixture Workspace         | Competition Workspace              | Refactor                           |
+| Fixture validation        | Series schedule validation         | Refactor                           |
+| Fixture generation        | Phase/Plot/Series/Game generation  | Replace                            |
+
+---
+
+# 44. Source-of-Truth Rule
+
+The Development documentation must maintain this separation:
+
+```text
+NGL Competition & Scheduling Specification v2
+        ↓
+defines WHAT the competition does
+
+Development Competition Architecture
+        ↓
+defines HOW the software represents it
+
+Prisma schema
+        ↓
+defines the persisted implementation
+
+NestJS services/controllers
+        ↓
+define executable backend behavior
+
+Next.js application
+        ↓
+defines operator/player interaction
+```
+
+The Prisma schema must not become the place where product rules are invented.
+
+The implementation must satisfy the canonical competition specification.

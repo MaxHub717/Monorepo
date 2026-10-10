@@ -1,0 +1,1207 @@
+NGL Competition & Scheduling Specification v2
+
+**Product:** NexGen Gaming League (NGL)
+**System:** NexGen League Platform
+**Document Status:** Canonical
+**Version:** 2.0
+**Replaces:** Previous Single Round Robin / Double Round Robin competition model
+**Audience:** League organizers, operators, administrators, product/design teams, and development teams
+
+---
+
+# 1. Purpose
+
+The NGL Competition & Scheduling Specification defines how an NGL season is structured, how registered competitors progress through the competition, how competitors are grouped into plots, how Series are created and resolved, and how those Series are scheduled and completed.
+
+The model is designed to support both small and large competition fields without requiring every competitor to play every other competitor.
+
+The competition model is based on:
+
+> **Season → Phase → Plot → Series → Games → Result → Advancement**
+
+The system must support large registration pools while keeping the actual competition workload manageable and progressively reducing the competition field as the season advances.
+
+---
+
+# 2. Competition Philosophy
+
+NGL uses a **progressive phase-and-plot competition model**.
+
+The system does not use traditional Single Round Robin or Double Round Robin as the primary season format.
+
+A player does not need to face every other player in the competition.
+
+Instead:
+
+1. Players enter the competition field.
+2. The field is divided into plots.
+3. Players are paired within their plots.
+4. Each pairing creates a Series.
+5. Each Series consists of three Games.
+6. A player must win at least two Games to advance.
+7. An unresolved or drawn Series eliminates both players.
+8. Advancing players form the competition field for the next Phase.
+9. New plots are generated from the surviving players.
+10. The process continues until the final Series determines the champion.
+
+This structure allows the same competition system to operate across different competition sizes.
+
+---
+
+# 3. Competition Hierarchy
+
+The canonical competition hierarchy is:
+
+```text
+Season
+  │
+  ├── Season Rules
+  │
+  └── Competition Field
+        │
+        ▼
+      Phase
+        │
+        ├── Plot
+        │     ├── Series
+        │     │    ├── Game 1
+        │     │    ├── Game 2
+        │     │    └── Game 3
+        │     │
+        │     └── ...
+        │
+        └── ...
+```
+
+The resulting progression is:
+
+```text
+Series Result
+      ↓
+Advancement / Elimination
+      ↓
+Phase Completion
+      ↓
+Advancement Pool
+      ↓
+Next Phase
+```
+
+---
+
+# 4. Competition Terminology
+
+## 4.1 Season
+
+A Season is a complete competition cycle from registration through the determination of a champion.
+
+Example:
+
+> NGL Season 1
+
+---
+
+## 4.2 Phase
+
+A Phase is a stage of the competition.
+
+Examples may include:
+
+* Opening Stage
+* Qualification Stage
+* Round of 32
+* Quarterfinal
+* Semifinal
+* Final
+
+The underlying system identifies phases numerically:
+
+```text
+Phase 1
+Phase 2
+Phase 3
+...
+```
+
+Phase names are configurable presentation labels.
+
+The number of phases is determined by the size and progression of the competition field rather than by a fixed season template.
+
+---
+
+## 4.3 Plot
+
+A Plot is a temporary group of competitors within a Phase.
+
+Plots are comparable to competition groups, but they are not permanent divisions or memberships.
+
+A player belongs to one Plot within a Phase.
+
+When the next Phase begins, the previous Plot structure is discarded and a new Plot structure is generated from the surviving competitors.
+
+---
+
+## 4.4 Series
+
+A Series is one player-versus-player competitive contest.
+
+A Series contains exactly three Games.
+
+```text
+Series
+├── Game 1
+├── Game 2
+└── Game 3
+```
+
+The Series is the primary competitive and scheduling unit.
+
+---
+
+## 4.5 Game
+
+A Game is one individual competitive encounter inside a Series.
+
+Every Series contains:
+
+* Game 1
+* Game 2
+* Game 3
+
+All three Games are expected to be completed.
+
+---
+
+## 4.6 Advancement
+
+Advancement means a player successfully qualifies for the next Phase.
+
+---
+
+## 4.7 Elimination
+
+Elimination means a player no longer continues in the current Season competition.
+
+---
+
+# 5. Registration and Competition Field
+
+Registration does not automatically mean that every registered player enters the competition field.
+
+The platform maintains a distinction between:
+
+```text
+Registered Players
+        ↓
+Eligibility Resolution
+        ↓
+Competition Field
+```
+
+The final competition field is established when registration closes and eligibility/selection processing is complete.
+
+The system must be able to distinguish:
+
+* total registrations;
+* eligible registrations;
+* selected competition participants;
+* non-selected/reserve registrations;
+* Phase 1 participants.
+
+The competition engine operates on the finalized competition field.
+
+---
+
+# 6. Phase Generation
+
+The system calculates an expected competition depth from the size of the competition field.
+
+For a normal progression in which approximately half the field advances after each Phase:
+
+> **Expected Phase Depth = ceil(log₂(N)) + 1**
+
+where `N` represents the Phase 1 competition field.
+
+Examples:
+
+| Phase 1 Competition Field | Expected Competition Depth |
+| ------------------------: | -------------------------: |
+|                         8 |                          4 |
+|                        16 |                          5 |
+|                        32 |                          6 |
+|                        64 |                          7 |
+|                       100 |                          8 |
+|                     1,000 |                         11 |
+
+This calculation is an expected depth rather than a guaranteed number of phases.
+
+The actual number of phases can change because a Series can eliminate both competitors when it is unresolved or contains a draw.
+
+The next Phase is therefore generated from the **actual surviving field**, not from an assumed survivor count.
+
+---
+
+# 7. Phase Progression
+
+A Phase follows this lifecycle:
+
+```text
+Phase Created
+      ↓
+Participants Assigned
+      ↓
+Plots Generated
+      ↓
+Series Generated
+      ↓
+Schedule Generated
+      ↓
+Series Played
+      ↓
+Results Submitted
+      ↓
+Results Validated
+      ↓
+Series Resolved
+      ↓
+Phase Completed
+      ↓
+Advancement Finalized
+      ↓
+Next Phase Generated
+```
+
+A subsequent Phase cannot begin normal Series generation until the previous Phase has completed and its advancement results have been finalized.
+
+---
+
+# 8. Plot Structure
+
+A Phase may contain up to **10 Plots**.
+
+There is no fixed universal player capacity for a Plot.
+
+Plot size is determined by the number of competitors available in the Phase.
+
+The platform should target approximately 20 competitors per Plot where practical.
+
+The default initial Plot calculation is:
+
+```text
+Initial Plot Count =
+min(10, ceil(Competition Field / 20))
+```
+
+Examples:
+
+| Competition Field | Initial Plots | Approximate Distribution |
+| ----------------: | ------------: | ------------------------ |
+|                20 |             1 | 20                       |
+|                40 |             2 | 20 each                  |
+|               100 |             5 | 20 each                  |
+|               200 |            10 | 20 each                  |
+|               500 |            10 | ~50 each                 |
+|             1,000 |            10 | 100 each                 |
+
+Twenty players is a **distribution target**, not a Plot capacity limit.
+
+---
+
+# 9. Later-Phase Plot Reduction
+
+The number of Plots must decrease as the competition progresses.
+
+A later Phase must not create more Plots than the previous Phase.
+
+The default calculation is:
+
+```text
+Next Plot Count =
+max(
+  1,
+  min(
+    Previous Plot Count - 1,
+    ceil(Current Competitors / 20)
+  )
+)
+```
+
+The final Phase always resolves into a single competition path.
+
+The exact number of competitors per Plot may therefore differ between Plots.
+
+Example:
+
+```text
+34 competitors
+
+Plot 1 → 10
+Plot 2 → 12
+Plot 3 → 12
+```
+
+Plot capacity is therefore dynamic.
+
+---
+
+# 10. Plot Distribution
+
+Players are distributed deterministically into the calculated number of Plots.
+
+The system must:
+
+1. determine the finalized Phase participant list;
+2. apply the approved competition seeding order;
+3. calculate the required Plot count;
+4. distribute competitors as evenly as practical;
+5. preserve the approved seeding order;
+6. assign each competitor to exactly one Plot.
+
+The system must not randomly recreate Plot membership without a valid competition reason.
+
+Plot assignment should be reproducible from the same participant and seeding inputs.
+
+---
+
+# 11. Plot Lifecycle
+
+Plots exist only within their Phase.
+
+For example:
+
+```text
+Phase 1
+├── Plot 1
+├── Plot 2
+├── Plot 3
+├── Plot 4
+└── Plot 5
+```
+
+After Phase 1:
+
+```text
+Phase 1 winners
+      ↓
+Advancement Pool
+      ↓
+Phase 2
+├── Plot 1
+├── Plot 2
+└── Plot 3
+```
+
+Phase 2 Plot 1 is not the continuation of Phase 1 Plot 1.
+
+Plots are therefore **temporary competition groupings**, not persistent player groups.
+
+---
+
+# 12. Series Generation
+
+Players within a Plot are paired into Series.
+
+Example:
+
+```text
+Plot 1
+
+Player 1 vs Player 2
+Player 3 vs Player 4
+Player 5 vs Player 6
+Player 7 vs Player 8
+...
+```
+
+Each pairing produces one Series.
+
+The maximum normal Series count for an even Plot containing `P` players is:
+
+> `P / 2`
+
+The Series count across a Phase therefore depends on the actual Phase field and Plot distribution.
+
+---
+
+# 13. Series Format
+
+Every Series contains exactly three Games.
+
+```text
+Series
+├── Game 1
+├── Game 2
+└── Game 3
+```
+
+All three Games must be played.
+
+A player winning the first two Games does not automatically cancel Game 3.
+
+The expected final Game count for a completed Series is:
+
+> **3 Games**
+
+---
+
+# 14. Series Advancement Rule
+
+A player advances only by winning at least two Games in the Series.
+
+Valid advancement outcomes are:
+
+```text
+2–1 → Player A advances
+1–2 → Player B advances
+```
+
+The Series must still contain all three Games.
+
+---
+
+# 15. Draw and Unresolved Series Rule
+
+A draw has a special competition consequence.
+
+If **any Game in a Series is drawn**, the Series becomes unresolved for advancement purposes.
+
+Both players are eliminated.
+
+Neither player advances.
+
+This rule applies regardless of the Game in which the draw occurs.
+
+Example:
+
+```text
+Game 1 → Player A wins
+Game 2 → Draw
+Game 3 → Player B wins
+
+Series result:
+Player A = 1
+Player B = 1
+Draw occurred
+
+Outcome:
+Both players eliminated
+```
+
+Likewise:
+
+```text
+Game 1 → Draw
+Game 2 → Player A wins
+Game 3 → Player B wins
+
+Outcome:
+Both players eliminated
+```
+
+An unresolved Series cannot produce an advancing player.
+
+---
+
+# 16. No Automatic Bye
+
+A player must not receive automatic advancement merely because a Phase contains an odd number of competitors.
+
+A bye would allow a player to advance without satisfying the Series requirement of winning two Games.
+
+Therefore:
+
+> **Every normal competitive Series requires exactly two players.**
+
+If the available competition field is odd, the system must resolve the odd field before normal Series generation proceeds.
+
+---
+
+# 17. Field Normalization
+
+When an odd competition field exists, the system enters:
+
+> **FIELD_NORMALIZATION_REQUIRED**
+
+The purpose of normalization is to produce an even field without granting an automatic advancement.
+
+A normalization Series is created using the approved lowest-seeded competitors in the affected field.
+
+The normalization Series follows the same Best-of-3 rules.
+
+The winner remains eligible for normal Series generation.
+
+The loser is eliminated.
+
+If the normalization Series contains a draw, both players are eliminated and the field is reduced accordingly.
+
+The system must complete normalization before the affected Phase can proceed to normal Series generation.
+
+---
+
+# 18. Advancement Pool
+
+At the end of a Phase, all resolved Series produce an advancement outcome.
+
+The system collects:
+
+```text
+Advancing Players
++
+Eliminated Players
+```
+
+Only advancing players enter the next Phase.
+
+The advancement pool becomes the participant source for the next Phase.
+
+Example:
+
+```text
+Phase 1
+100 competitors
+      ↓
+Series resolution
+      ↓
+34 advancing players
+      ↓
+Phase 2 competition field
+```
+
+---
+
+# 19. Phase Completion
+
+A Phase is complete only when:
+
+* all required Series have been completed;
+* all three Games in each Series have been processed;
+* results have been submitted;
+* results have been validated;
+* all Series outcomes have been resolved;
+* unresolved/draw outcomes have been processed;
+* advancement has been finalized;
+* no required Series remains pending.
+
+Only then can the next Phase be generated.
+
+---
+
+# 20. Example: 100-Player Season
+
+Assume 100 players form the finalized competition field.
+
+### Phase 1
+
+```text
+100 competitors
+
+5 Plots
+
+Plot 1 → 20
+Plot 2 → 20
+Plot 3 → 20
+Plot 4 → 20
+Plot 5 → 20
+```
+
+Each Plot generates 10 normal Series.
+
+Total:
+
+```text
+50 Series
+```
+
+Assume the results are:
+
+```text
+Plot 1 → 10 advancing players
+Plot 2 → 5 advancing players
+Plot 3 → 4 advancing players
+Plot 4 → 10 advancing players
+Plot 5 → 5 advancing players
+```
+
+Total:
+
+```text
+34 advancing players
+```
+
+### Phase 2
+
+The 34 advancing players become the Phase 2 field.
+
+The engine generates:
+
+```text
+3 Plots
+
+Plot 1 → 10
+Plot 2 → 12
+Plot 3 → 12
+```
+
+The new Series are generated from these new Plot assignments.
+
+The process repeats using the actual number of surviving players.
+
+---
+
+# 21. Example: 1,000-Player Season
+
+Assume 1,000 players form the finalized competition field.
+
+### Phase 1
+
+```text
+1,000 players
+10 Plots
+
+~100 players per Plot
+```
+
+Approximately:
+
+```text
+500 Series
+```
+
+If every Series produces one advancing player:
+
+```text
+1,000
+  ↓
+500
+```
+
+### Phase 2
+
+The actual 500 advancing players become the next competition field.
+
+The Plot count decreases.
+
+```text
+500 competitors
+9 Plots
+```
+
+Approximately:
+
+```text
+250 Series
+```
+
+Potential field:
+
+```text
+500
+ ↓
+250
+```
+
+### Subsequent Phases
+
+The system continues:
+
+```text
+~250
+ ↓
+~125
+ ↓
+~62
+ ↓
+~31
+ ↓
+...
+ ↓
+8
+ ↓
+4
+ ↓
+2
+ ↓
+1 Champion
+```
+
+These values are illustrative progression estimates.
+
+The actual field can shrink faster whenever Series produce unresolved/draw outcomes.
+
+The system must always generate the next Phase from the **actual survivors**.
+
+---
+
+# 22. Scheduling Model
+
+The Series is the scheduling unit.
+
+The system does not independently schedule Game 1, Game 2, and Game 3 as separate appointments.
+
+Instead:
+
+```text
+Series
+   ↓
+One Match Appointment
+   ↓
+Game 1
+Game 2
+Game 3
+```
+
+---
+
+# 23. Match Window
+
+Every Series has a:
+
+> **60-minute Match Window**
+
+All three Games must be played within this window.
+
+The system must therefore schedule enough time for:
+
+```text
+Game 1
+Game 2
+Game 3
+```
+
+within the single appointment.
+
+---
+
+# 24. Check-In Window
+
+Check-in opens:
+
+> **60 minutes before the scheduled Series**
+
+Check-in closes:
+
+> **30 minutes before the scheduled Series**
+
+Example:
+
+```text
+14:00 — Check-in opens
+14:30 — Check-in closes
+15:00 — Series starts
+```
+
+---
+
+# 25. Match Window
+
+At the scheduled start:
+
+```text
+15:00 — Match Window opens
+16:00 — Match Window closes
+```
+
+All three Games must be completed during this period.
+
+---
+
+# 26. Results Window
+
+The Results Window remains open for:
+
+> **30 minutes after the Match Window closes**
+
+Example:
+
+```text
+15:00 — Match starts
+16:00 — Match window closes
+16:30 — Results window closes
+```
+
+The purpose of the Results Window is to allow results to be submitted, validated, and finalized promptly.
+
+---
+
+# 27. Complete Scheduling Timeline
+
+The complete lifecycle is:
+
+```text
+T-60
+Check-in Opens
+      │
+      │
+T-30
+Check-in Closes
+      │
+      │
+T
+Match Window Opens
+      │
+      ├── Game 1
+      ├── Game 2
+      └── Game 3
+      │
+T+60
+Match Window Closes
+      │
+      │
+T+90
+Results Window Closes
+```
+
+---
+
+# 28. Scheduling Conflicts
+
+A player must not be scheduled for overlapping Series.
+
+The scheduling system must validate:
+
+* participant overlap;
+* appointment overlap;
+* invalid windows;
+* duplicate appointments;
+* invalid timezone;
+* missing schedule information;
+* Series assigned to the wrong Phase;
+* Series scheduled before its Phase is ready.
+
+Scheduling conflicts are hard validation failures.
+
+A schedule containing a participant conflict cannot be locked.
+
+---
+
+# 29. Phase Scheduling
+
+The scheduler must calculate the schedule based on the actual number of Series in the Phase.
+
+The system must not assume:
+
+> seven weeks per Phase
+
+or:
+
+> one Series per player per week.
+
+Phase duration is dynamic.
+
+It depends on:
+
+* number of competitors;
+* number of Plots;
+* number of Series;
+* available scheduling periods;
+* available match windows;
+* participant conflicts;
+* required Series density;
+* operational scheduling configuration.
+
+Phase 1 will normally require the longest duration because it contains the largest competition field.
+
+---
+
+# 30. Scheduling Generation
+
+The system automatically generates the initial schedule.
+
+Operators should not be required to manually schedule every Series.
+
+The scheduler must:
+
+1. load the authoritative Series;
+2. determine the available scheduling periods;
+3. determine available match windows;
+4. assign Series appointments;
+5. check participant conflicts;
+6. calculate the check-in window;
+7. calculate the Match Window;
+8. calculate the Results Window;
+9. validate the resulting schedule;
+10. report warnings and errors.
+
+Operators may adjust appointments before schedule lock.
+
+---
+
+# 31. Schedule Validation
+
+A schedule must pass validation before it can be locked.
+
+### Hard validation errors
+
+Examples:
+
+* participant double-booked;
+* overlapping Series;
+* missing appointment;
+* invalid timezone;
+* invalid Match Window;
+* invalid Check-In Window;
+* invalid Results Window;
+* duplicate appointment;
+* Series outside its Phase;
+* schedule incomplete.
+
+### Warnings
+
+Examples:
+
+* unusually high participant workload;
+* unusually dense scheduling;
+* unusually long Phase duration;
+* operational capacity concerns.
+
+Warnings do not automatically invalidate a schedule unless the relevant season configuration explicitly defines them as blocking conditions.
+
+---
+
+# 32. Schedule Lock
+
+Once the schedule has been reviewed and validated, the operator can lock it.
+
+A locked schedule is read-only through normal scheduling operations.
+
+Schedule lock requires:
+
+* complete Series schedule;
+* valid appointments;
+* no hard scheduling conflicts;
+* successful schedule validation;
+* current validation state;
+* correct Phase/Season lifecycle state.
+
+Changes after locking require an authorized exception/override process.
+
+---
+
+# 33. Season Rules
+
+Every Season must have a player-facing ruleset.
+
+The ruleset explains how the Season operates from registration through completion.
+
+At minimum, the Season Rules must define:
+
+### Competition
+
+* Season format
+* Phase structure
+* Plot structure
+* Series format
+* Game count
+* advancement rules
+* elimination rules
+* draw/unresolved rules
+
+### Scheduling
+
+* Match Window
+* Check-In Window
+* Results Window
+* timezone
+* scheduling rules
+* rescheduling rules
+
+### Participation
+
+* registration requirements
+* eligibility
+* competition-field rules
+* participation requirements
+
+### Match Operations
+
+* Game requirements
+* Series completion
+* result submission
+* result validation
+* evidence requirements
+
+### Disputes
+
+* dispute process
+* escalation
+* operator authority
+* appeal process
+
+### Conduct
+
+* fair play
+* no-show
+* abandonment
+* cheating
+* penalties
+* sanctions
+
+### Payments
+
+* registration fees
+* applicable competition fees
+* payment deadlines
+* refund rules
+* prize/reward rules where applicable
+
+---
+
+# 34. Season Rules Administration
+
+Season Rules must be available within the Admin system.
+
+Administrators/operators must be able to:
+
+* view the active Season Rules;
+* configure permitted Season rules before competition;
+* preview player-facing rules;
+* publish the rules;
+* identify the active rules version;
+* lock the rules when required by the Season lifecycle.
+
+Once competition begins, rules affecting active competition should not be silently modified.
+
+Changes must create a new version and follow the platform's authorized change/override process.
+
+---
+
+# 35. Competition State Principles
+
+The competition engine must preserve the distinction between:
+
+```text
+Registration
+Competition Field
+Phase
+Plot
+Series
+Game
+Result
+Advancement
+Schedule
+```
+
+None of these concepts should be treated as interchangeable.
+
+In particular:
+
+> **Plot ≠ Division**
+
+> **Series ≠ Game**
+
+> **Series ≠ Phase**
+
+> **Registration ≠ Competition Participation**
+
+> **Schedule ≠ Result**
+
+> **Advancement ≠ Registration**
+
+---
+
+# 36. Large-Scale Competition Principle
+
+The competition system must not generate an all-versus-all fixture set.
+
+The workload grows progressively according to the number of competitors who actually advance.
+
+For a 1,000-player field, the intended progression is approximately:
+
+```text
+1,000
+ ↓
+500
+ ↓
+250
+ ↓
+125
+ ↓
+~62
+ ↓
+~31
+ ↓
+...
+ ↓
+2
+ ↓
+Champion
+```
+
+This makes large registration pools practical without requiring every competitor to play every other competitor.
+
+---
+
+# 37. Canonical Rules Summary
+
+The NGL Competition Engine v2 is governed by the following core rules:
+
+1. **NGL no longer uses Single Round Robin or Double Round Robin as its primary competition model.**
+2. Competition is structured as **Season → Phase → Plot → Series → Games**.
+3. The player is the competitive unit.
+4. Registration and the final competition field are separate concepts.
+5. Phase structure is calculated from the actual competition field.
+6. A Phase may contain up to 10 Plots.
+7. Plot size is dynamic.
+8. Approximately 20 competitors per Plot is a distribution target, not a capacity limit.
+9. Plot count decreases as the competition advances.
+10. Plots are temporary and are regenerated for every Phase.
+11. Every normal Series contains exactly three Games.
+12. All three Games must be played.
+13. A player must win at least two Games to advance.
+14. A draw in any Game causes both players in the Series to be eliminated.
+15. An unresolved Series eliminates both players.
+16. No automatic bye grants advancement.
+17. Odd competition fields require normalization.
+18. A later Phase cannot be generated until the previous Phase is fully resolved.
+19. Series are the scheduling unit.
+20. Each Series has one 60-minute Match Window.
+21. Check-in opens 60 minutes before the Series.
+22. Check-in closes 30 minutes before the Series.
+23. All three Games occur within the 60-minute Match Window.
+24. The Results Window closes 30 minutes after the Match Window.
+25. Schedules are automatically generated and validated.
+26. Operators may adjust schedules before lock.
+27. A schedule must be validated before it can be locked.
+28. Every Season has a player-facing Season Ruleset.
+29. Season Rules are administered and versioned through the Admin system.
+30. The next Phase is always generated from the **actual surviving competition field**, never from a predetermined survivor count.
+
+---
+
+# 38. Relationship to the Development System
+
+This document defines **what the NGL competition must do**.
+
+It does not prescribe:
+
+* database table names;
+* API endpoint names;
+* Prisma implementation;
+* React components;
+* Docker configuration;
+* internal service classes;
+* migration implementation.
+
+Those belong in the Development documentation.
+
+The Development specification must implement this document as the canonical competition behavior.
+
+Where implementation conflicts with this specification, the implementation must be reviewed and corrected rather than changing the competition rules implicitly.
+
+---
+
+# 39. Supersession
+
+This specification supersedes the previous NGL competition assumptions based on:
+
+* Single Round Robin;
+* Double Round Robin;
+* fixed competition rounds;
+* fixed seven-week competition periods;
+* fixture-centric competition progression;
+* fixed participant counts;
+* permanent competition groups.
+
+The new canonical model is:
+
+> **Progressive Phase-and-Plot Competition using Best-of-3 Series with dynamic advancement and automated Series scheduling.**

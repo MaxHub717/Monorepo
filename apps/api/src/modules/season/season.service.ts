@@ -12,14 +12,58 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../events/outbox.service.js';
 import { AuditService } from '../audit/audit.service.js';
-import { FixtureService } from '../fixture/fixture.service.js';
+import { createCompetitionNotifications } from '../notification/notification.service.js';
 import { eligiblePlayerProfileWhere } from '../participation/eligibility.js';
 import {
-  expectedRoundRobinFixtureCount,
-  MAX_FIXTURES_PER_GENERATION,
   resolveCompetitionParticipantCount,
   selectCompetitionParticipants,
 } from './competition-field.js';
+import {
+  buildPlayerFacingRules,
+  validateCompetitionRules,
+  validateSeriesSchedule,
+  type SeriesScheduleValidationInput,
+} from '../competition/competition.domain.js';
+
+function asPlayerIds(value: Prisma.JsonValue | null | undefined): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function buildCanonicalScheduleValidationInput(season: any, phases: any[]): SeriesScheduleValidationInput {
+  const rows = phases.flatMap((phase) => phase.plots.flatMap((plot: any) => plot.series.map((series: any) => {
+    const savedPlayers = asPlayerIds(series.participant_player_ids);
+    const firstGame = series.games[0];
+    const playerIds = savedPlayers.length === 2
+      ? savedPlayers
+      : [firstGame?.home_player_id, firstGame?.away_player_id].filter((playerId): playerId is string => Boolean(playerId));
+    return { phase, plot, series, playerIds };
+  })));
+  return {
+    automatic: false,
+    competitionTimezone: season.competition_timezone,
+    seasonStartAt: season.start_date ?? new Date(0),
+    seasonEndAt: season.end_date ?? new Date(0),
+    phases: phases.map((phase) => ({
+      id: phase.id,
+      startAt: phase.start_at ?? new Date(0),
+      endAt: phase.end_at ?? new Date(0),
+    })),
+    series: rows.map(({ phase, series, playerIds }) => ({ id: series.id, phaseId: phase.id, playerIds })),
+    appointments: rows.map(({ phase, series, playerIds }) => ({
+      seriesId: series.id,
+      phaseId: phase.id,
+      playerIds,
+      scheduleKey: series.schedule_key,
+      checkInOpensAt: series.check_in_opens_at,
+      checkInClosesAt: series.check_in_closes_at,
+      matchWindowStartAt: series.match_window_start,
+      matchWindowEndAt: series.match_window_end,
+      resultsDeadlineAt: series.results_deadline_at,
+      timezone: series.match_window_timezone,
+      gameNumbers: series.games.map((game: any) => game.game_number),
+    })),
+  };
+}
 
 @Injectable()
 export class SeasonService {
@@ -27,7 +71,6 @@ export class SeasonService {
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
     private readonly auditService: AuditService,
-    private readonly fixtureService: FixtureService,
   ) {}
 
   private readonly validTransitions: Record<string, string[]> = {
@@ -66,6 +109,7 @@ export class SeasonService {
       where: { id: seasonId },
       include: {
         league: { select: { id: true, name: true, status: true } },
+        ruleset: true,
         divisions: {
           include: {
             _count: { select: { participants: true, fixtures: true, matches: true, standings_rows: true } },
@@ -85,14 +129,14 @@ export class SeasonService {
       this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['COMPLETED', 'CONFIRMED', 'ARCHIVED'] } } }),
     ]);
 
-    const readiness = await this.getTransitionReadiness(seasonId, season.status, fixtureCount, confirmedMatchCount);
+    const readiness = await this.getTransitionReadiness(seasonId, season.status);
 
     const nextAction = {
       DRAFT: { label: 'Open registration', endpoint: 'publish', reason: 'Complete configuration before accepting participants.' },
       REGISTRATION_OPEN: { label: 'Close registration', endpoint: 'close-registration', reason: 'Finalize the participant pool when registration ends.' },
-      REGISTRATION_CLOSED: { label: 'Lock roster', endpoint: 'lock-roster', reason: 'Verify eligible participants before generating fixtures.' },
-      ROSTER_LOCKED: { label: 'Activate season', endpoint: 'activate', reason: 'Ensure the fixture schedule is generated before activation.' },
-      ACTIVE: { label: 'Start playoffs', endpoint: 'start-playoffs', reason: 'Move to playoffs after the regular season is complete.' },
+      REGISTRATION_CLOSED: { label: 'Lock roster', endpoint: 'lock-roster', reason: 'Verify eligible participants before generating Phases and Series.' },
+      ROSTER_LOCKED: { label: 'Activate season', endpoint: 'activate', reason: 'Ensure canonical Phase schedules are validated and locked.' },
+      ACTIVE: { label: 'Start playoffs', endpoint: 'start-playoffs', reason: 'Move forward after all current Phase Series are resolved.' },
       PLAYOFFS: { label: 'Complete season', endpoint: 'complete', reason: 'Finalize the champion and season record.' },
       COMPLETED: { label: 'Archive season', endpoint: 'archive', reason: 'Make the completed season historical and read-only.' },
       ARCHIVED: null,
@@ -108,6 +152,20 @@ export class SeasonService {
       registration_open_at: season.registration_open_at,
       registration_close_at: season.registration_close_at,
       league: season.league,
+      ruleset: season.ruleset ? {
+        id: season.ruleset.id,
+        name: season.ruleset_name ?? season.ruleset.name,
+        version: season.ruleset_version ?? season.ruleset.version,
+        status: season.ruleset.status,
+        publishedAt: season.ruleset.published_at,
+        rulesHash: season.ruleset.rules_hash,
+      } : null,
+      playerFacingRules: season.ruleset
+        ? buildPlayerFacingRules(validateCompetitionRules(season.ruleset.rules), {
+            name: season.ruleset_name ?? season.ruleset.name,
+            version: season.ruleset_version ?? season.ruleset.version,
+          })
+        : null,
       counts: {
         participants: season._count.participants,
         divisions: season._count.divisions,
@@ -124,30 +182,21 @@ export class SeasonService {
     };
   }
 
-  private async getTransitionReadiness(seasonId: string, status: string, fixtureCount: number, confirmedMatchCount: number) {
+  private async getTransitionReadiness(seasonId: string, status: string) {
     const divisions = await this.prisma.division.findMany({
       where: { season_id: seasonId, active: true },
       select: {
         id: true,
         name: true,
-        format: true,
-        capacity: true,
-        competition_participant_count: true,
-        schedule_locked: true,
-        schedule_validation_required: true,
         participants: {
-          where: {
-            status: 'ACTIVE',
-            player: { is: eligiblePlayerProfileWhere },
-          },
-          select: { player_id: true, seed: true, registered_at: true, competition_selected: true },
+          where: { status: 'ACTIVE', player: { is: eligiblePlayerProfileWhere } },
+          select: { player_id: true },
         },
-        _count: { select: { fixtures: true } },
       },
     });
     const issues: string[] = [];
     if (['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED'].includes(status) && !divisions.length) {
-      issues.push('At least one active division is required.');
+      issues.push('At least one active participant group is required.');
     }
     if (status === 'DRAFT' && !(await this.hasValidSeasonDates(seasonId))) {
       issues.push('Season start and end dates are required before registration opens.');
@@ -158,67 +207,51 @@ export class SeasonService {
       }
     }
     if (status === 'ROSTER_LOCKED') {
-      for (const division of divisions) {
-        const eligibleCount = division.participants.length;
-        const competitionCount = resolveCompetitionParticipantCount(division, eligibleCount);
-        if (competitionCount < 2) {
-          issues.push(`${division.name} needs a competition field of at least two participants.`);
-          continue;
-        }
-        if (division.capacity !== null && competitionCount > division.capacity) {
-          issues.push(`${division.name} competition field cannot exceed its capacity of ${division.capacity}.`);
-          continue;
-        }
-        if (competitionCount > eligibleCount) {
-          issues.push(`${division.name} needs ${competitionCount} eligible participants for its configured competition field; found ${eligibleCount}.`);
-          continue;
-        }
-        const expected = expectedRoundRobinFixtureCount(competitionCount, division.format);
-        if (expected > MAX_FIXTURES_PER_GENERATION) {
-          issues.push(`${division.name} requires ${expected} fixtures, above the per-transaction generation limit of ${MAX_FIXTURES_PER_GENERATION}.`);
-          continue;
-        }
-        if (!division.schedule_locked) {
-          issues.push(`${division.name} schedule must be locked before the season can be activated.`);
-        }
-        if (division.schedule_validation_required) {
-          issues.push(`${division.name} schedule requires validation before the season can be activated.`);
-        }
-        const selectedCount = division.participants.filter(({ competition_selected }) => competition_selected).length;
-        const selectedPlayerIds = division.participants
-          .filter(({ competition_selected }) => competition_selected)
-          .map(({ player_id }) => player_id);
-        const expectedSelectedPlayerIds = new Set(
-          selectCompetitionParticipants(division.participants, competitionCount)
-            .map(({ player_id }) => player_id),
-        );
-        if (selectedCount !== competitionCount) {
-          issues.push(`${division.name} must select exactly ${competitionCount} eligible competition participants; found ${selectedCount}.`);
-        } else if (selectedPlayerIds.some((playerId) => !expectedSelectedPlayerIds.has(playerId))) {
-          issues.push(`${division.name} selected participants do not match the deterministic competition field.`);
-        }
-        const offFieldFixtureCount = selectedPlayerIds.length
-          ? await this.prisma.fixture.count({
-              where: {
-                division_id: division.id,
-                OR: [
-                  { home_player_id: { notIn: selectedPlayerIds } },
-                  { away_player_id: { notIn: selectedPlayerIds } },
-                ],
-              },
-            })
-          : division._count.fixtures;
-        if (offFieldFixtureCount > 0) {
-          issues.push(`${division.name} has ${offFieldFixtureCount} fixtures involving participants outside the selected competition field.`);
-        }
-        if (selectedCount !== competitionCount || selectedPlayerIds.some((playerId) => !expectedSelectedPlayerIds.has(playerId))) {
-          continue;
-        }
-        if (division._count.fixtures !== expected) issues.push(`${division.name} needs ${expected} generated fixtures before activation.`);
+      const readiness = await this.getCanonicalScheduleReadiness(seasonId, this.prisma);
+      issues.push(...readiness.issues);
+    }
+    if (status === 'ACTIVE') {
+      const phases = await this.prisma.phase.findMany({
+        where: { season_id: seasonId, phase_type: { not: 'FINAL' } },
+        include: { plots: { include: { series: { select: { status: true } } } } },
+      });
+      if (!phases.length || phases.some((phase) => phase.plots.flatMap((plot) => plot.series)
+        .some((series) => !['COMPLETED', 'ELIMINATED'].includes(series.status)))) {
+        issues.push('All current Phase Series must be resolved before advancing to playoffs.');
       }
     }
-    if (status === 'ACTIVE' && (confirmedMatchCount < fixtureCount || fixtureCount === 0)) {
-      issues.push('All regular-season matches must be confirmed before playoffs can begin.');
+    if (status === 'PLAYOFFS') {
+      const finalPhases = await this.prisma.phase.findMany({
+        where: { season_id: seasonId, phase_type: 'FINAL' },
+        include: { plots: { include: { series: { select: { status: true } } } } },
+      });
+      if (!finalPhases.length || finalPhases.some((phase) => phase.status !== 'COMPLETED'
+        || phase.plots.flatMap((plot) => plot.series).some((series) => !['COMPLETED', 'ELIMINATED'].includes(series.status)))) {
+        issues.push('The Final Phase and all of its Series must be resolved before completing the Season.');
+      }
+    }
+    return { canAdvance: issues.length === 0, issues };
+  }
+
+  private async getCanonicalScheduleReadiness(seasonId: string, client: any) {
+    const season = await client.season.findUnique({ where: { id: seasonId } });
+    const phases = await client.phase.findMany({
+      where: { season_id: seasonId },
+      orderBy: { phase_number: 'asc' },
+      include: { plots: { include: { series: { include: { games: true } } } } },
+    });
+    const issues: string[] = [];
+    if (!season?.start_date || !season.end_date) issues.push('Season start and end dates are required before scheduling.');
+    if (!phases.length) issues.push('Generate the canonical Phase structure before activating this Season.');
+    if (phases.some((phase: any) => !phase.schedule_locked)) {
+      issues.push('Every Phase schedule must be validated and locked before Season activation.');
+    }
+    const rows = phases.flatMap((phase: any) => phase.plots.flatMap((plot: any) => plot.series.map((series: any) => ({ phase, plot, series }))));
+    if (!rows.length) issues.push('Generate Series for every Phase before activating this Season.');
+    if (season && phases.length && rows.length) {
+      const validationInput = buildCanonicalScheduleValidationInput(season, phases);
+      const report = validateSeriesSchedule(validationInput);
+      if (!report.valid) issues.push(...report.errors.map((error) => `${error.seriesId}: ${error.message}`));
     }
     return { canAdvance: issues.length === 0, issues };
   }
@@ -237,15 +270,13 @@ export class SeasonService {
     if (endDate <= startDate) {
       throw new BadRequestException('Season end date must be after start date');
     }
+    this.assertNoLegacyFixtureConfig(dto, 'createSeason');
     this.validateSchedulingConfig({
       capacity: dto.divisionCapacity,
       registrationCapacity: dto.registrationCapacity,
       competitionParticipantCount: dto.competitionParticipantCount,
-      schedulingPeriodDays: dto.schedulingPeriodDays,
-      matchesPerParticipant: dto.matchesPerParticipant,
       matchWindowStartMinutes: dto.matchWindowStartMinutes,
       matchWindowEndMinutes: dto.matchWindowEndMinutes,
-      concurrentMatches: dto.concurrentMatches,
     });
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -254,6 +285,14 @@ export class SeasonService {
         select: { id: true },
       });
       if (!league) throw new NotFoundException('Active league not found');
+
+      const ruleset = dto.rulesetId
+        ? await tx.competitionRuleset.findUnique({ where: { id: dto.rulesetId } })
+        : await tx.competitionRuleset.findFirst({ where: { status: 'PUBLISHED' }, orderBy: { published_at: 'desc' } });
+      if (!ruleset || ruleset.status !== 'PUBLISHED') {
+        throw new BadRequestException('Choose a published Competition Ruleset before creating a Season.');
+      }
+      const publishedRules = validateCompetitionRules(ruleset.rules);
 
       const season = await tx.season.create({
         // A season is always created inside an active permanent league.
@@ -264,6 +303,10 @@ export class SeasonService {
           status: 'DRAFT',
           start_date: startDate,
           end_date: endDate,
+          ruleset_id: ruleset.id,
+          ruleset_name: ruleset.name,
+          ruleset_version: ruleset.version,
+          competition_config: { rules: publishedRules, rulesHash: ruleset.rules_hash } as Prisma.InputJsonValue,
         },
       });
 
@@ -286,6 +329,23 @@ export class SeasonService {
         },
       });
 
+      await tx.auditLog.create({
+        data: {
+          entity_type: 'Season',
+          entity_id: season.id,
+          action: 'SEASON_RULESET_ATTACHED',
+          actor_id: actor?.id,
+          actor_role: actor?.role,
+          request_id: actor?.requestId,
+          after_state: {
+            rulesetId: ruleset.id,
+            rulesetName: ruleset.name,
+            rulesetVersion: ruleset.version,
+            rulesHash: ruleset.rules_hash,
+          },
+        },
+      });
+
 
       await this.outbox.enqueueEvent(tx, {
         eventName: 'season.created',
@@ -299,6 +359,28 @@ export class SeasonService {
 
       return season;
     });
+  }
+
+  async getPlayerFacingRules(seasonId: string) {
+    const season = await this.prisma.season.findUnique({ where: { id: seasonId }, include: { ruleset: true } });
+    if (!season) throw new NotFoundException('Season not found');
+    if (!season.ruleset) {
+      return { available: false, seasonId, rulesetName: season.ruleset_name, rulesetVersion: season.ruleset_version, playerFacing: null };
+    }
+    const rules = validateCompetitionRules(season.ruleset.rules);
+    return {
+      available: true,
+      seasonId,
+      rulesetId: season.ruleset.id,
+      rulesetName: season.ruleset_name ?? season.ruleset.name,
+      rulesetVersion: season.ruleset_version ?? season.ruleset.version,
+      rulesHash: season.ruleset.rules_hash,
+      publishedAt: season.ruleset.published_at?.toISOString() ?? null,
+      playerFacing: buildPlayerFacingRules(rules, {
+        name: season.ruleset_name ?? season.ruleset.name,
+        version: season.ruleset_version ?? season.ruleset.version,
+      }),
+    };
   }
 
   private async changeStatus(
@@ -346,112 +428,138 @@ export class SeasonService {
       if (season.status !== 'ROSTER_LOCKED') {
         throw new BadRequestException('Season roster must be locked before activation');
       }
-
-      const divisions = await tx.division.findMany({
-        where: { season_id: seasonId, active: true },
-        select: {
-          id: true,
-          name: true,
-          format: true,
-          capacity: true,
-          competition_participant_count: true,
-          schedule_locked: true,
-          schedule_validation_required: true,
-        },
-      });
-      if (!divisions.length) throw new BadRequestException('Season must have at least one active division');
-
-      for (const division of divisions) {
-        if (!division.schedule_locked) {
-          throw new BadRequestException(`Division ${division.name} schedule must be locked before activation`);
-        }
-        if (division.schedule_validation_required) {
-          throw new BadRequestException(`Division ${division.name} schedule requires validation before activation`);
-        }
-        const participants = await tx.divisionParticipant.findMany({
-          where: {
-            season_id: seasonId,
-            division_id: division.id,
-            status: 'ACTIVE',
-            player: { is: eligiblePlayerProfileWhere },
-          },
-          select: { player_id: true, seed: true, registered_at: true, competition_selected: true },
-        });
-        const participantCount = participants.length;
-        if (participantCount < 2) {
-          throw new BadRequestException(`Division ${division.name} requires at least two eligible active players`);
-        }
-
-        const competitionCount = division.competition_participant_count ?? division.capacity ?? participantCount;
-        if (competitionCount < 2) {
-          throw new BadRequestException(`Division ${division.name} requires a competition field of at least two participants`);
-        }
-        if (division.capacity !== null && competitionCount > division.capacity) {
-          throw new BadRequestException(`Division ${division.name} competition field cannot exceed its capacity of ${division.capacity}`);
-        }
-        if (competitionCount > participantCount) {
-          throw new BadRequestException(`Division ${division.name} requires ${competitionCount} eligible participants for its configured competition field`);
-        }
-        const expectedFixtures = expectedRoundRobinFixtureCount(competitionCount, division.format);
-        if (expectedFixtures > MAX_FIXTURES_PER_GENERATION) {
-          throw new BadRequestException(
-            `Division ${division.name} requires ${expectedFixtures} fixtures, above the per-transaction generation limit of ${MAX_FIXTURES_PER_GENERATION}`,
-          );
-        }
-        const selectedPlayerIds = participants
-          .filter(({ competition_selected }) => competition_selected)
-          .map(({ player_id }) => player_id);
-        const expectedSelectedPlayerIds = selectCompetitionParticipants(participants, competitionCount)
-          .map(({ player_id }) => player_id);
-        if (selectedPlayerIds.length !== competitionCount ||
-          expectedSelectedPlayerIds.some((playerId) => !selectedPlayerIds.includes(playerId))) {
-          throw new BadRequestException(`Division ${division.name} competition field does not match the deterministic selection`);
-        }
-        const offFieldFixtureCount = await tx.fixture.count({
-          where: {
-            division_id: division.id,
-            OR: [
-              { home_player_id: { notIn: selectedPlayerIds } },
-              { away_player_id: { notIn: selectedPlayerIds } },
-            ],
-          },
-        });
-        if (offFieldFixtureCount > 0) {
-          throw new BadRequestException(`Division ${division.name} has fixtures outside its selected competition field`);
-        }
-        const fixtureCount = await tx.fixture.count({ where: { division_id: division.id } });
-        if (fixtureCount !== expectedFixtures) {
-          throw new BadRequestException(`Division ${division.name} must have a complete generated fixture schedule before activation`);
-        }
-        const validation = await this.fixtureService.validateDivisionSchedule(
-          seasonId,
-          division.id,
-          actor,
-          tx,
-        );
-        if (!validation.valid || validation.summary.scheduled !== expectedFixtures) {
-          const reasons = validation.errors.length ? `: ${validation.errors.join(' ')}` : '.';
-          throw new BadRequestException(
-            `Division ${division.name} schedule is not valid and cannot be activated${reasons}`,
-          );
-        }
+      const readiness = await this.getCanonicalScheduleReadiness(seasonId, tx);
+      if (!readiness.canAdvance) {
+        throw new BadRequestException(`Canonical competition schedule is not ready for activation: ${readiness.issues.join(' ')}`);
       }
     }
 
     if (newStatus === 'PLAYOFFS') {
-      const pending = await tx.match.count({ where: { season_id: seasonId, status: { notIn: ['COMPLETED', 'CONFIRMED', 'ARCHIVED', 'VOID', 'FORFEITED', 'CANCELLED'] } } });
-      if (pending > 0) throw new BadRequestException('All regular-season matches must be resolved before playoffs can begin');
-      const standingsCount = await tx.standingsRow.count({ where: { season_id: seasonId } });
-      if (standingsCount < 4) throw new BadRequestException('At least four standings rows are required before playoffs can begin');
+      const phases = await tx.phase.findMany({
+        where: { season_id: seasonId, phase_type: { not: 'FINAL' } },
+        include: { plots: { include: { series: { select: { status: true } } } } },
+      });
+      const unresolved = phases.flatMap((phase: any) => phase.plots.flatMap((plot: any) => plot.series))
+        .filter((series: any) => !['COMPLETED', 'ELIMINATED'].includes(series.status));
+      if (!phases.length || unresolved.length > 0) {
+        throw new BadRequestException('All current Phase Series must be resolved before advancing to playoffs.');
+      }
     }
 
     if (newStatus === 'COMPLETED') {
       if (season.status !== 'PLAYOFFS') throw new BadRequestException('Season must be in playoffs before it can be completed');
-      const unresolved = await tx.dispute.count({ where: { match: { season_id: seasonId }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } } });
-      if (unresolved > 0) throw new BadRequestException('All disputes must be resolved before completing the season');
+      const finalPhases = await tx.phase.findMany({
+        where: { season_id: seasonId, phase_type: 'FINAL' },
+        include: {
+          plots: {
+            include: {
+              series: {
+                include: {
+                  games: {
+                    include: { result_verifications: { orderBy: [{ created_at: 'desc' }, { id: 'desc' }] } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      const finalSeries = finalPhases.flatMap((phase: any) => phase.plots.flatMap((plot: any) => plot.series));
+      const unresolved = finalSeries.filter((series: any) => !['COMPLETED', 'ELIMINATED'].includes(series.status));
+      if (!finalPhases.length || unresolved.length > 0 || finalPhases.some((phase: any) => phase.status !== 'COMPLETED')) {
+        throw new BadRequestException('Resolve and complete the Final Phase before completing the Season.');
+      }
+
+      const incompleteGames = finalSeries.flatMap((series: any) => series.games)
+        .filter((game: any) => game.status !== 'COMPLETED' || game.result === null);
+      if (incompleteGames.length > 0) {
+        throw new BadRequestException('Every Final Phase Game must be resolved before the Season can be completed.');
+      }
+
+      const unverifiedGames = finalSeries.flatMap((series: any) => series.games)
+        .filter((game: any) => {
+          const resultVerifications = Array.isArray((game as any).result_verifications)
+            ? (game as any).result_verifications
+            : [];
+          const currentVersionEvents = resultVerifications.filter((entry: any) => entry.result_version === game.result_version);
+          const latest = currentVersionEvents.find((entry: any) => entry.status !== 'PENDING') ?? currentVersionEvents[0];
+          return !latest || !['APPROVED', 'OVERRIDDEN'].includes(latest.status);
+        });
+      if (unverifiedGames.length > 0) {
+        throw new BadRequestException('Final Phase results must be approved or overridden before a champion can be declared.');
+      }
+
+      const championCandidates = Array.from(new Set(
+        finalSeries
+          .filter((series: any) => series.status === 'COMPLETED' && series.winner_player_id)
+          .map((series: any) => series.winner_player_id)
+          .filter((playerId: unknown): playerId is string => typeof playerId === 'string' && !!playerId),
+      ));
+      if (championCandidates.length !== 1) {
+        throw new BadRequestException('A single champion must be identified from the Final Phase before Season completion.');
+      }
+      const championPlayerId = championCandidates[0];
+
+      const unresolvedDisputes = await tx.dispute.findMany({
+        where: {
+          OR: [
+            { phase_id: finalPhases[0].id, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } },
+            { series_id: { in: finalSeries.map((series: any) => series.id) }, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } },
+            { player_id: championPlayerId, status: { in: ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (unresolvedDisputes.length > 0) {
+        throw new BadRequestException('Resolve all disputes affecting the Final Phase or champion before completing the Season.');
+      }
+
+      const pendingPenalties = await tx.penalty.findMany({
+        where: {
+          OR: [
+            { phase_id: finalPhases[0].id, effect_status: { notIn: ['APPLIED', 'EXPIRED', 'REVOKED'] }, status: { notIn: ['EXPIRED', 'REVOKED'] } },
+            { season_id: seasonId, scope_type: 'SEASON', effect_status: { notIn: ['APPLIED', 'EXPIRED', 'REVOKED'] }, status: { notIn: ['EXPIRED', 'REVOKED'] } },
+            { player_id: championPlayerId, effect_status: { notIn: ['APPLIED', 'EXPIRED', 'REVOKED'] }, status: { notIn: ['EXPIRED', 'REVOKED'] } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (pendingPenalties.length > 0) {
+        throw new BadRequestException('Resolve all applicable penalties before completing the Season.');
+      }
+
+      const champion = await tx.playerProfile.findUnique({
+        where: { id: championPlayerId },
+        select: { id: true, gamer_tag: true },
+      });
+      const seasonCompletion = {
+        championPlayerId,
+        championGamerTag: champion?.gamer_tag ?? null,
+        finalPhaseId: finalPhases[0].id,
+        finalSeasonStatus: 'COMPLETED',
+        completedAt: new Date().toISOString(),
+      };
+      const existingConfig = season.competition_config && typeof season.competition_config === 'object' && !Array.isArray(season.competition_config)
+        ? season.competition_config as Record<string, unknown>
+        : {};
+      (metadata as Record<string, unknown> | undefined) ??= {};
+      (metadata as Record<string, unknown>).seasonCompletion = seasonCompletion;
+      (metadata as Record<string, unknown>).publicResult = {
+        championPlayerId,
+        championGamerTag: champion?.gamer_tag ?? null,
+        status: 'COMPLETED',
+        completedAt: seasonCompletion.completedAt,
+      };
+      const config = { ...existingConfig, seasonCompletion, publicResult: (metadata as Record<string, unknown>).publicResult };
+      if (season.competition_config !== config) {
+        metadata = { ...(metadata as Record<string, unknown>), config };
+      }
     }
 
     const updateData: Prisma.SeasonUpdateInput = { status: newStatus as Prisma.SeasonUpdateInput['status'] };
+    if (newStatus === 'COMPLETED') {
+      updateData.competition_config = (metadata as Record<string, unknown>)?.config ?? metadata ?? undefined;
+    }
     if (newStatus === 'REGISTRATION_OPEN') {
       updateData.registration_open_at = new Date();
       if (!season.registration_close_at && season.start_date) {
@@ -473,6 +581,22 @@ export class SeasonService {
       correlationId: actor?.correlationId,
       metadata: metadata ?? { before: season, after: updated },
     });
+    if (newStatus === 'COMPLETED') {
+      const completion = (metadata as Record<string, unknown> | undefined)?.seasonCompletion as
+        { championGamerTag?: string | null } | undefined;
+      const finalSeries = await tx.series.findMany({
+        where: { phase: { season_id: seasonId, phase_type: 'FINAL' } },
+        select: { id: true, participant_player_ids: true },
+      });
+      await createCompetitionNotifications(tx, {
+        playerIds: finalSeries.flatMap((series) => asPlayerIds(series.participant_player_ids)),
+        eventType: 'SEASON_COMPLETED',
+        eventKey: `season-completed:${seasonId}`,
+        title: 'Season completed',
+        message: `${season.name} has completed${completion?.championGamerTag ? `; ${completion.championGamerTag} is the champion` : ''}.`,
+        relatedEntity: `Season:${seasonId}`,
+      });
+    }
 
     try {
       await this.auditService.writeLog({
@@ -552,6 +676,7 @@ export class SeasonService {
       if (data.capacity !== undefined && data.capacity < 2) {
         throw new BadRequestException('Division capacity must be at least 2 when specified');
       }
+      this.assertNoLegacyFixtureConfig(data, 'createDivision');
       this.validateSchedulingConfig(data);
 
       const division = await tx.division.create({
@@ -624,6 +749,7 @@ export class SeasonService {
       if (data.capacity !== undefined && data.capacity !== null && data.capacity < 2) {
         throw new BadRequestException('Division capacity must be at least 2 when specified');
       }
+      this.assertNoLegacyFixtureConfig(data, 'updateDivision');
       this.validateSchedulingConfig(data, before);
 
       const updated = await tx.division.update({
@@ -663,45 +789,58 @@ export class SeasonService {
     return this.updateDivision(divisionId, { active: false }, actor);
   }
 
+  private assertNoLegacyFixtureConfig(
+    data: {
+      schedulingPeriodDays?: number;
+      matchesPerParticipant?: number;
+      matchWindowStartMinutes?: number | null;
+      matchWindowEndMinutes?: number | null;
+      matchWindowTimezone?: string;
+      concurrentMatches?: number;
+    },
+    operation: string,
+  ) {
+    const legacyKeys: string[] = [];
+    if (data.schedulingPeriodDays !== undefined) legacyKeys.push('schedulingPeriodDays');
+    if (data.matchesPerParticipant !== undefined) legacyKeys.push('matchesPerParticipant');
+    if (data.concurrentMatches !== undefined) legacyKeys.push('concurrentMatches');
+    if (data.matchWindowStartMinutes !== undefined) legacyKeys.push('matchWindowStartMinutes');
+    if (data.matchWindowEndMinutes !== undefined) legacyKeys.push('matchWindowEndMinutes');
+    if (data.matchWindowTimezone !== undefined) legacyKeys.push('matchWindowTimezone');
+    if (legacyKeys.length > 0) {
+      throw new BadRequestException(
+        `legacy Fixture density configuration is retired for ${operation}. Use canonical Phase/Plot/Series/Game rulesets and scheduling only.`,
+      );
+    }
+  }
+
   private validateSchedulingConfig(
     data: {
       capacity?: number | null;
       registrationCapacity?: number | null;
       competitionParticipantCount?: number | null;
-      schedulingPeriodDays?: number;
-      matchesPerParticipant?: number;
       matchWindowStartMinutes?: number | null;
       matchWindowEndMinutes?: number | null;
-      concurrentMatches?: number;
     },
     existing?: {
       capacity: number | null;
       registration_capacity: number | null;
       competition_participant_count: number | null;
-      scheduling_period_days: number;
-      matches_per_participant: number;
       match_window_start_minutes: number | null;
       match_window_end_minutes: number | null;
-      concurrent_matches: number;
     },
   ) {
     const capacity = data.capacity === undefined ? existing?.capacity : data.capacity;
     const registrationCapacity = data.registrationCapacity === undefined ? existing?.registration_capacity : data.registrationCapacity;
     const competitionParticipantCount = data.competitionParticipantCount === undefined ? existing?.competition_participant_count : data.competitionParticipantCount;
-    const periodDays = data.schedulingPeriodDays ?? existing?.scheduling_period_days ?? 7;
-    const matchesPerParticipant = data.matchesPerParticipant ?? existing?.matches_per_participant ?? 1;
     const windowStart = data.matchWindowStartMinutes === undefined ? existing?.match_window_start_minutes : data.matchWindowStartMinutes;
     const windowEnd = data.matchWindowEndMinutes === undefined ? existing?.match_window_end_minutes : data.matchWindowEndMinutes;
-    const concurrentMatches = data.concurrentMatches ?? existing?.concurrent_matches ?? 1;
 
     if (capacity !== null && capacity !== undefined && capacity < 2) throw new BadRequestException('Division capacity must be at least 2');
     if (registrationCapacity !== null && registrationCapacity !== undefined && registrationCapacity < 2) throw new BadRequestException('Registration capacity must be at least 2');
     if (competitionParticipantCount !== null && competitionParticipantCount !== undefined && competitionParticipantCount < 2) throw new BadRequestException('Competition participant count must be at least 2');
     if (capacity !== null && capacity !== undefined && competitionParticipantCount !== null && competitionParticipantCount !== undefined && competitionParticipantCount > capacity) throw new BadRequestException('Competition participant count cannot exceed division capacity');
     if (registrationCapacity !== null && registrationCapacity !== undefined && capacity !== null && capacity !== undefined && registrationCapacity < capacity) throw new BadRequestException('Registration capacity cannot be lower than division capacity');
-    if (periodDays < 1) throw new BadRequestException('Scheduling period must be at least one day');
-    if (matchesPerParticipant < 1) throw new BadRequestException('Match frequency must be at least one match per participant per period');
-    if (concurrentMatches < 1) throw new BadRequestException('Concurrent matches must be at least one');
     if (windowStart !== null && windowStart !== undefined && (windowStart < 0 || windowStart >= 1440)) throw new BadRequestException('Match window start must be between 00:00 and 23:59');
     if (windowEnd !== null && windowEnd !== undefined && (windowEnd < 1 || windowEnd > 1440)) throw new BadRequestException('Match window end must be between 00:01 and 24:00');
     if (windowStart !== null && windowStart !== undefined && windowEnd !== null && windowEnd !== undefined && windowEnd <= windowStart) throw new BadRequestException('Match window end must be after its start');

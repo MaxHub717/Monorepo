@@ -5,8 +5,8 @@ export default function NavBar() {
   return (
     <nav className={styles.navLinks}>
       <Link href="/">Home</Link>
+      <Link href="/seasons">Competitions</Link>
       <Link href="/standings">Standings</Link>
-      <Link href="/fixtures">Fixtures</Link>
       <Link href="/mvp">MVP</Link>
       <Link href="/clubs">Clubs</Link>
       <Link href="/player/dashboard">Player</Link>

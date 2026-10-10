@@ -28,6 +28,8 @@ enum PermissionName {
   MANAGE_SEASONS
   MANAGE_MATCHES
   MANAGE_RESULTS
+  MANAGE_COMPETITION_EXCEPTIONS
+  OVERRIDE_COMPETITION_RESULTS
   MANAGE_DISPUTES
   MANAGE_PENALTIES
   MANAGE_CLUBS
@@ -84,6 +86,66 @@ enum DivisionType {
 enum CompetitionFormat {
   ROUND_ROBIN_SINGLE
   ROUND_ROBIN_DOUBLE
+}
+
+enum CompetitionPhaseType {
+  QUALIFYING
+  PLAYOFF
+  FINAL
+  CUSTOM
+}
+
+enum CompetitionPlotStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum CompetitionSeriesStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  ELIMINATED
+  DISPUTED
+}
+
+enum CompetitionGameStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum CompetitionGameOutcome {
+  HOME_WIN
+  AWAY_WIN
+  DRAW
+  UNRESOLVED
+}
+
+enum GameResultVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CORRECTION_REQUESTED
+  OVERRIDDEN
+}
+
+enum CompetitionSeriesResolutionState {
+  UNRESOLVED
+  IN_PROGRESS
+  RESOLVED
+  DRAW
+}
+
+enum CompetitionEliminationOutcome {
+  WINNER_ADVANCES
+  BOTH_ELIMINATED
+}
+
+enum CompetitionRulesetStatus {
+  DRAFT
+  PUBLISHED
 }
 
 enum ClubStatus {
@@ -177,12 +239,53 @@ enum DisputeStatus {
   CLOSED
 }
 
+enum DisputeTargetType {
+  MATCH
+  SEASON
+  PHASE
+  PLOT
+  SERIES
+  GAME
+}
+
 enum PenaltyType {
   WARNING
   FORFEIT
   POINT_DEDUCTION
   SUSPENSION
   BAN
+  DISQUALIFICATION
+}
+
+enum PenaltyScopeType {
+  PLAYER
+  CLUB
+  MATCH
+  SEASON
+  PHASE
+  PLOT
+  SERIES
+  GAME
+  USER
+  LEGACY
+}
+
+enum PenaltyEffectType {
+  NONE
+  POINTS_DEDUCTION
+  GAME_FORFEIT
+  SERIES_FORFEIT
+  EXECUTION_BLOCK
+  ADVANCEMENT_EXCLUSION
+  COMPETITION_DISQUALIFICATION
+}
+
+enum PenaltyEffectStatus {
+  NOT_APPLICABLE
+  DECLARED_NOT_APPLIED
+  APPLIED
+  EXPIRED
+  REVOKED
 }
 
 enum PenaltyStatus {
@@ -219,9 +322,16 @@ model User {
   rewards            Reward[]
   achievements       Achievement[]
   notifications      Notification[]
+  notification_preference NotificationPreference?
   audit_logs         AuditLog[]
   outbox_events      OutboxEvent[]
   match_status_transitions MatchStatusTransition[]
+  series_checkins_as_operator SeriesCheckIn[] @relation("SeriesCheckInOperator")
+  assigned_disputes Dispute[] @relation("DisputeReviewer")
+  dispute_events DisputeEvent[] @relation("DisputeEventActor")
+  submitted_dispute_evidence DisputeEvidence[] @relation("DisputeEvidenceSubmitter")
+  issued_penalties Penalty[] @relation("PenaltyIssuer")
+  penalty_events PenaltyEvent[] @relation("PenaltyEventActor")
 
   @@map("users")
 }
@@ -249,6 +359,7 @@ model PlayerProfile {
   user               User            @relation(fields: [user_id], references: [id])
   division_participations DivisionParticipant[]
   match_participants      MatchParticipant[]
+  series_check_ins        SeriesCheckIn[]
   home_fixtures           Fixture[]           @relation("playerHomeFixtures")
   away_fixtures           Fixture[]           @relation("playerAwayFixtures")
   standings_rows          StandingsRow[]
@@ -498,32 +609,288 @@ model ClubMember {
   @@map("club_members")
 }
 
-model Season {
-  id                   String       @id @default(uuid()) @db.Uuid
-  league_id            String       @db.Uuid
-  name                 String
-  description          String?
-  status               SeasonStatus @default(DRAFT)
-  start_date           DateTime?
-  end_date             DateTime?
-  registration_open_at DateTime?
-  registration_close_at DateTime?
-  created_at            DateTime     @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime     @updatedAt @db.Timestamptz(6)
-  deleted_at            DateTime?    @db.Timestamptz(6)
+model CompetitionRuleset {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  name                   String
+  version                String
+  description            String?
+  status                 CompetitionRulesetStatus @default(DRAFT)
+  rules                  Json
+  rules_hash             String?
+  published_at           DateTime?              @db.Timestamptz(6)
+  published_by_id        String?                @db.Uuid
+  supersedes_ruleset_id  String?                @db.Uuid
+  created_at             DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime               @updatedAt @db.Timestamptz(6)
 
-  league              League       @relation(fields: [league_id], references: [id])
-  divisions           Division[]
-  match_weeks         MatchWeek[]
-  matches             Match[]
-  standings_rows      StandingsRow[]
-  participants        DivisionParticipant[]
-  club_applications   ClubApplication[]
-  rewards             Reward[]
+  seasons                Season[]
+  supersedes             CompetitionRuleset?    @relation("CompetitionRulesetVersions", fields: [supersedes_ruleset_id], references: [id], onDelete: Restrict)
+  versions               CompetitionRuleset[]   @relation("CompetitionRulesetVersions")
+
+  @@unique([name, version])
+  @@index([status, published_at])
+  @@map("competition_rulesets")
+}
+
+model Season {
+  id                         String       @id @default(uuid()) @db.Uuid
+  league_id                  String       @db.Uuid
+  name                       String
+  description                String?
+  status                     SeasonStatus @default(DRAFT)
+  start_date                 DateTime?
+  end_date                   DateTime?
+  registration_open_at       DateTime?
+  registration_close_at      DateTime?
+  competition_timezone       String       @default("UTC")
+  ruleset_id                 String?      @db.Uuid
+  ruleset_name               String?
+  ruleset_version            String?
+  competition_config         Json?
+  created_at                 DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime     @updatedAt @db.Timestamptz(6)
+  deleted_at                 DateTime?    @db.Timestamptz(6)
+
+  league                     League                @relation(fields: [league_id], references: [id])
+  ruleset                    CompetitionRuleset?   @relation(fields: [ruleset_id], references: [id], onDelete: Restrict)
+  divisions                  Division[]
+  phases                     Phase[]
+  series                     Series[]
+  match_weeks                MatchWeek[]
+  matches                    Match[]
+  standings_rows             StandingsRow[]
+  participants               DivisionParticipant[]
+  disputes                   Dispute[]
+  penalties                   Penalty[]
+  club_applications          ClubApplication[]
+  rewards                    Reward[]
 
   @@unique([league_id, name])
   @@index([league_id, status])
   @@map("seasons")
+}
+
+model Phase {
+  id                      String                @id @default(uuid()) @db.Uuid
+  season_id               String                @db.Uuid
+  phase_number            Int
+  phase_type              CompetitionPhaseType  @default(QUALIFYING)
+  name                    String?
+  start_at                DateTime?
+  end_at                  DateTime?
+  status                  String                @default("DRAFT")
+  schedule_locked         Boolean               @default(false)
+  participating_player_ids Json?
+  configuration           Json?
+  completed_at            DateTime?
+  created_at              DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime              @updatedAt @db.Timestamptz(6)
+
+  season                  Season                @relation(fields: [season_id], references: [id])
+  plots                   Plot[]
+  series                  Series[]
+  transitions_from        PhaseTransitionAudit? @relation("PhaseTransitionFrom")
+  transitions_to          PhaseTransitionAudit? @relation("PhaseTransitionTo")
+  disputes                Dispute[]
+  penalties               Penalty[]
+
+  @@unique([season_id, phase_number])
+  @@map("competition_phases")
+}
+
+model Plot {
+  id          String               @id @default(uuid()) @db.Uuid
+  phase_id    String               @db.Uuid
+  name        String?
+  status      CompetitionPlotStatus @default(ACTIVE)
+  player_ids  Json                 @default("[]")
+  configuration Json?
+  created_at  DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime             @updatedAt @db.Timestamptz(6)
+
+  phase       Phase                @relation(fields: [phase_id], references: [id])
+  series      Series[]
+  disputes    Dispute[]
+  penalties   Penalty[]
+
+  @@index([phase_id, status])
+  @@map("competition_plots")
+}
+
+model Series {
+  id                        String                 @id @default(uuid()) @db.Uuid
+  season_id                 String                 @db.Uuid
+  phase_id                  String                 @db.Uuid
+  plot_id                   String                 @db.Uuid
+  series_number             Int?
+  status                    CompetitionSeriesStatus @default(DRAFT)
+  start_at                  DateTime?
+  end_at                    DateTime?
+  participant_player_ids    Json                     @default("[]")
+  schedule_key              String?                  @unique(map: "competition_series_schedule_key_key")
+  check_in_opens_at         DateTime?                @db.Timestamptz(6)
+  check_in_closes_at        DateTime?                @db.Timestamptz(6)
+  match_window_start        DateTime?                @db.Timestamptz(6)
+  match_window_end          DateTime?                @db.Timestamptz(6)
+  match_window_timezone     String?
+  results_deadline_at       DateTime?                @db.Timestamptz(6)
+  expected_game_count       Int                      @default(3)
+  completed_game_count      Int                      @default(0)
+  home_win_count            Int                      @default(0)
+  away_win_count            Int                      @default(0)
+  draw_count                Int                      @default(0)
+  unresolved_game_count     Int                      @default(0)
+  resolution_state          CompetitionSeriesResolutionState @default(UNRESOLVED)
+  elimination_outcome       CompetitionEliminationOutcome?
+  eliminated_player_id      String?                  @db.Uuid
+  eliminated_player_ids     Json?
+  resolution_reason         String?
+  winner_player_id          String?                @db.Uuid
+  configuration             Json?
+  created_at                DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime               @updatedAt @db.Timestamptz(6)
+
+  season                    Season                 @relation(fields: [season_id], references: [id])
+  phase                     Phase                  @relation(fields: [phase_id], references: [id])
+  plot                      Plot                   @relation(fields: [plot_id], references: [id])
+  games                     Game[]
+  check_ins                 SeriesCheckIn[]
+  resolution_audits         SeriesResolutionAudit[]
+  disputes                  Dispute[]
+  penalties                 Penalty[]
+
+  @@unique([phase_id, plot_id, series_number])
+  @@index([phase_id, match_window_start, match_window_end])
+  @@map("competition_series")
+}
+
+model SeriesCheckIn {
+  id                 String   @id @default(uuid()) @db.Uuid
+  series_id          String   @db.Uuid
+  player_id          String   @db.Uuid
+  checked_in_at      DateTime @db.Timestamptz(6)
+  checked_in_by_id   String?  @db.Uuid
+  is_exception       Boolean  @default(false)
+  exception_reason   String?
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @updatedAt @db.Timestamptz(6)
+
+  series             Series        @relation(fields: [series_id], references: [id], onDelete: Cascade, map: "competition_series_check_ins_series_fkey")
+  player             PlayerProfile @relation(fields: [player_id], references: [id], onDelete: Restrict, map: "competition_series_check_ins_player_fkey")
+  checked_in_by      User?         @relation("SeriesCheckInOperator", fields: [checked_in_by_id], references: [id], onDelete: SetNull, map: "competition_series_check_ins_operator_fkey")
+
+  @@unique([series_id, player_id], map: "competition_series_check_ins_series_player_key")
+  @@index([player_id, checked_in_at], map: "competition_series_check_ins_player_checked_in_at_idx")
+  @@map("competition_series_check_ins")
+}
+
+model Game {
+  id                String                 @id @default(uuid()) @db.Uuid
+  series_id         String                 @db.Uuid
+  game_number       Int
+  home_player_id    String?                @db.Uuid
+  away_player_id    String?                @db.Uuid
+  winner_player_id  String?                @db.Uuid
+  home_score        Int?
+  away_score        Int?
+  result            CompetitionGameOutcome?
+  status            CompetitionGameStatus  @default(PENDING)
+  scheduled_at      DateTime?
+  started_at        DateTime?              @db.Timestamptz(6)
+  completed_at      DateTime?              @db.Timestamptz(6)
+  result_recorded_at DateTime?             @db.Timestamptz(6)
+  result_recorded_by_id String?             @db.Uuid
+  result_reason     String?
+  result_version    Int                    @default(0)
+  created_at        DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime               @updatedAt @db.Timestamptz(6)
+
+  series            Series                 @relation(fields: [series_id], references: [id])
+  result_audits     GameResultAudit[]
+  disputes          Dispute[]
+  penalties         Penalty[]
+  result_verifications GameResultVerification[]
+
+  @@unique([series_id, game_number])
+  @@map("competition_games")
+}
+
+model GameResultAudit {
+  id              String   @id @default(uuid()) @db.Uuid
+  game_id         String   @db.Uuid
+  result_version  Int
+  action          String
+  result          CompetitionGameOutcome?
+  winner_player_id String?  @db.Uuid
+  home_score      Int?
+  away_score      Int?
+  actor_id        String?  @db.Uuid
+  actor_role      String?
+  reason          String?
+  before_state    Json?
+  after_state     Json?
+  request_id      String?
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  game            Game     @relation(fields: [game_id], references: [id], onDelete: Restrict, map: "competition_game_result_audits_game_fkey")
+
+  @@unique([game_id, result_version], map: "competition_game_result_audits_version_unique")
+  @@index([game_id, created_at], map: "competition_game_result_audits_game_created_idx")
+  @@map("competition_game_result_audits")
+}
+
+model GameResultVerification {
+  id             String                       @id @default(uuid()) @db.Uuid
+  game_id        String                       @db.Uuid
+  result_version Int
+  status         GameResultVerificationStatus
+  actor_id       String?                      @db.Uuid
+  actor_role     String?
+  reason         String?
+  created_at     DateTime                     @default(now()) @db.Timestamptz(6)
+
+  game           Game                         @relation(fields: [game_id], references: [id], onDelete: Restrict, map: "competition_game_result_verifications_game_fkey")
+
+  @@index([game_id, result_version, created_at], map: "competition_game_result_verifications_game_version_idx")
+  @@map("competition_game_result_verifications")
+}
+
+model SeriesResolutionAudit {
+  id                    String                       @id @default(uuid()) @db.Uuid
+  series_id             String                       @unique(map: "competition_series_resolution_audits_series_unique") @db.Uuid
+  idempotency_key       String                       @unique(map: "competition_series_resolution_audits_idempotency_unique")
+  outcome               CompetitionEliminationOutcome
+  advancing_player_id   String?                      @db.Uuid
+  eliminated_player_ids Json
+  resolution_reason     String
+  game_results          Json
+  before_state          Json?
+  after_state           Json
+  actor_id              String?                      @db.Uuid
+  created_at            DateTime                     @default(now()) @db.Timestamptz(6)
+
+  series                Series                       @relation(fields: [series_id], references: [id], onDelete: Restrict, map: "competition_series_resolution_audits_series_fkey")
+
+  @@map("competition_series_resolution_audits")
+}
+
+model PhaseTransitionAudit {
+  id                    String   @id @default(uuid()) @db.Uuid
+  from_phase_id         String   @unique(map: "competition_phase_transition_audits_from_phase_unique") @db.Uuid
+  to_phase_id           String   @unique(map: "competition_phase_transition_audits_to_phase_unique") @db.Uuid
+  idempotency_key       String   @unique(map: "competition_phase_transition_audits_idempotency_unique")
+  advancement_pool      Json
+  eliminated_player_ids Json
+  source_series_ids     Json
+  phase_window          Json
+  actor_id              String?  @db.Uuid
+  transitioned_at       DateTime @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  from_phase            Phase    @relation("PhaseTransitionFrom", fields: [from_phase_id], references: [id], onDelete: Restrict, map: "competition_phase_transition_audits_from_phase_fkey")
+  to_phase              Phase    @relation("PhaseTransitionTo", fields: [to_phase_id], references: [id], onDelete: Restrict, map: "competition_phase_transition_audits_to_phase_fkey")
+
+  @@map("competition_phase_transition_audits")
 }
 
 model Division {
@@ -652,6 +1019,7 @@ model Match {
   status_transitions MatchStatusTransition[]
   disputes     Dispute[]
   penalties    Penalty[]
+  penalties    Penalty[]
 
   @@index([season_id, division_id, status])
   @@map("matches")
@@ -709,53 +1077,155 @@ model MatchResult {
 }
 
 model Dispute {
-  id           String        @id @default(uuid()) @db.Uuid
-  match_id     String        @db.Uuid
-  player_id    String?       @db.Uuid
-  club_id      String?       @db.Uuid
-  user_id      String?       @db.Uuid
-  issue        String
-  status       DisputeStatus @default(SUBMITTED)
-  resolution   String?
-  created_at   DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime      @updatedAt @db.Timestamptz(6)
-  resolved_at  DateTime?
+  id                    String            @id @default(uuid()) @db.Uuid
+  target_type           DisputeTargetType @default(MATCH)
+  target_id             String            @db.Uuid
+  match_id              String?           @db.Uuid
+  season_id             String?           @db.Uuid
+  phase_id              String?           @db.Uuid
+  plot_id               String?           @db.Uuid
+  series_id             String?           @db.Uuid
+  game_id               String?           @db.Uuid
+  player_id             String?           @db.Uuid
+  club_id               String?           @db.Uuid
+  user_id               String?           @db.Uuid
+  assigned_reviewer_id  String?           @db.Uuid
+  issue                 String
+  status                DisputeStatus     @default(SUBMITTED)
+  decision              String?
+  resolution            String?
+  resolution_reason     String?
+  submitted_at          DateTime          @default(now()) @db.Timestamptz(6)
+  created_at            DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime          @updatedAt @db.Timestamptz(6)
+  reviewed_at           DateTime?         @db.Timestamptz(6)
+  resolved_at           DateTime?         @db.Timestamptz(6)
 
-  match    Match          @relation(fields: [match_id], references: [id])
-  player   PlayerProfile? @relation(fields: [player_id], references: [id])
-  club     Club?    @relation(fields: [club_id], references: [id])
-  user     User?    @relation(fields: [user_id], references: [id])
-  penalties Penalty[]
+  match          Match?         @relation(fields: [match_id], references: [id], onDelete: Restrict, map: "disputes_match_id_fkey")
+  season         Season?        @relation(fields: [season_id], references: [id], onDelete: Restrict, map: "disputes_season_id_fkey")
+  phase          Phase?         @relation(fields: [phase_id], references: [id], onDelete: Restrict, map: "disputes_phase_id_fkey")
+  plot           Plot?          @relation(fields: [plot_id], references: [id], onDelete: Restrict, map: "disputes_plot_id_fkey")
+  series         Series?        @relation(fields: [series_id], references: [id], onDelete: Restrict, map: "disputes_series_id_fkey")
+  game           Game?          @relation(fields: [game_id], references: [id], onDelete: Restrict, map: "disputes_game_id_fkey")
+  player         PlayerProfile? @relation(fields: [player_id], references: [id])
+  club           Club?          @relation(fields: [club_id], references: [id])
+  user           User?          @relation(fields: [user_id], references: [id])
+  assigned_reviewer User?       @relation("DisputeReviewer", fields: [assigned_reviewer_id], references: [id], onDelete: SetNull, map: "disputes_assigned_reviewer_id_fkey")
+  evidence       DisputeEvidence[]
+  events         DisputeEvent[]
+  penalties      Penalty[]
 
+  @@index([target_type, target_id, status])
+  @@index([season_id, status])
+  @@index([phase_id, status])
+  @@index([series_id, status])
+  @@index([game_id, status])
   @@index([match_id, status])
-  @@index([player_id, status])
+  @@index([assigned_reviewer_id, status])
   @@map("disputes")
 }
 
+model DisputeEvidence {
+  id                String   @id @default(uuid()) @db.Uuid
+  dispute_id        String   @db.Uuid
+  submitted_by_id   String?  @db.Uuid
+  resource_url      String
+  description       String?
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  dispute           Dispute  @relation(fields: [dispute_id], references: [id], onDelete: Restrict, map: "dispute_evidence_dispute_id_fkey")
+  submitted_by      User?    @relation("DisputeEvidenceSubmitter", fields: [submitted_by_id], references: [id], onDelete: SetNull, map: "dispute_evidence_submitted_by_id_fkey")
+
+  @@index([dispute_id, created_at])
+  @@map("dispute_evidence")
+}
+
+model DisputeEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  dispute_id     String        @db.Uuid
+  action         String
+  from_status    DisputeStatus?
+  to_status      DisputeStatus?
+  actor_id       String?       @db.Uuid
+  actor_role     String?
+  reason         String?
+  metadata       Json?
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+
+  dispute        Dispute       @relation(fields: [dispute_id], references: [id], onDelete: Restrict, map: "dispute_events_dispute_id_fkey")
+  actor          User?         @relation("DisputeEventActor", fields: [actor_id], references: [id], onDelete: SetNull, map: "dispute_events_actor_id_fkey")
+
+  @@index([dispute_id, created_at])
+  @@index([actor_id, created_at])
+  @@map("dispute_events")
+}
+
 model Penalty {
-  id          String         @id @default(uuid()) @db.Uuid
-  match_id    String?        @db.Uuid
-  player_id   String?        @db.Uuid
-  club_id     String?        @db.Uuid
-  user_id     String?        @db.Uuid
-  dispute_id  String?        @db.Uuid
-  type        PenaltyType    @default(WARNING)
-  status      PenaltyStatus  @default(PROPOSED)
-  reason      String?
-  issued_at   DateTime       @default(now()) @db.Timestamptz(6)
-  expires_at  DateTime?
-  created_at  DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime       @updatedAt @db.Timestamptz(6)
+  id             String             @id @default(uuid()) @db.Uuid
+  scope_type     PenaltyScopeType   @default(LEGACY)
+  scope_id       String?            @db.Uuid
+  match_id       String?            @db.Uuid
+  player_id      String?            @db.Uuid
+  club_id        String?            @db.Uuid
+  user_id        String?            @db.Uuid
+  season_id      String?            @db.Uuid
+  phase_id       String?            @db.Uuid
+  plot_id        String?            @db.Uuid
+  series_id      String?            @db.Uuid
+  game_id        String?            @db.Uuid
+  dispute_id     String?            @db.Uuid
+  issued_by_id   String?            @db.Uuid
+  type           PenaltyType        @default(WARNING)
+  effect_type    PenaltyEffectType  @default(NONE)
+  effect_status  PenaltyEffectStatus @default(NOT_APPLICABLE)
+  effect_amount  Int?
+  status         PenaltyStatus      @default(PROPOSED)
+  reason         String
+  issued_at      DateTime           @default(now()) @db.Timestamptz(6)
+  effective_at   DateTime           @default(now()) @db.Timestamptz(6)
+  expires_at     DateTime?
+  created_at     DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime           @updatedAt @db.Timestamptz(6)
 
-  match   Match?         @relation(fields: [match_id], references: [id])
-  player  PlayerProfile? @relation(fields: [player_id], references: [id])
-  club    Club?    @relation(fields: [club_id], references: [id])
-  user    User?    @relation(fields: [user_id], references: [id])
-  dispute Dispute? @relation(fields: [dispute_id], references: [id])
+  match          Match?         @relation(fields: [match_id], references: [id])
+  player         PlayerProfile? @relation(fields: [player_id], references: [id])
+  club           Club?          @relation(fields: [club_id], references: [id])
+  user           User?          @relation(fields: [user_id], references: [id])
+  season         Season?        @relation(fields: [season_id], references: [id], onDelete: Restrict, map: "penalties_season_id_fkey")
+  phase          Phase?         @relation(fields: [phase_id], references: [id], onDelete: Restrict, map: "penalties_phase_id_fkey")
+  plot           Plot?          @relation(fields: [plot_id], references: [id], onDelete: Restrict, map: "penalties_plot_id_fkey")
+  series         Series?        @relation(fields: [series_id], references: [id], onDelete: Restrict, map: "penalties_series_id_fkey")
+  game           Game?          @relation(fields: [game_id], references: [id], onDelete: Restrict, map: "penalties_game_id_fkey")
+  dispute        Dispute?       @relation(fields: [dispute_id], references: [id])
+  issued_by      User?          @relation("PenaltyIssuer", fields: [issued_by_id], references: [id], onDelete: SetNull, map: "penalties_issued_by_id_fkey")
+  events         PenaltyEvent[]
 
-  @@index([match_id, status])
+  @@index([scope_type, scope_id, status])
+  @@index([season_id, phase_id, status])
+  @@index([series_id, status])
+  @@index([game_id, status])
   @@index([player_id, status])
+  @@index([club_id, status])
   @@map("penalties")
+}
+
+model PenaltyEvent {
+  id           String        @id @default(uuid()) @db.Uuid
+  penalty_id   String        @db.Uuid
+  action       String
+  from_status  PenaltyStatus?
+  to_status    PenaltyStatus?
+  actor_id     String?       @db.Uuid
+  actor_role   String?
+  reason       String
+  metadata     Json?
+  created_at   DateTime      @default(now()) @db.Timestamptz(6)
+
+  penalty      Penalty       @relation(fields: [penalty_id], references: [id], onDelete: Restrict, map: "penalty_events_penalty_id_fkey")
+  actor        User?         @relation("PenaltyEventActor", fields: [actor_id], references: [id], onDelete: SetNull, map: "penalty_events_actor_id_fkey")
+
+  @@index([penalty_id, created_at])
+  @@map("penalty_events")
 }
 
 model StandingsRow {
@@ -823,6 +1293,9 @@ model Notification {
   title          String
   message        String
   category       String?
+  event_type     String?
+  event_key      String?  @unique
+  priority       String   @default("NORMAL")
   related_entity String?
   read           Boolean  @default(false)
   created_at     DateTime @default(now()) @db.Timestamptz(6)
@@ -831,6 +1304,17 @@ model Notification {
   user User @relation(fields: [user_id], references: [id])
 
   @@map("notifications")
+}
+
+model NotificationPreference {
+  user_id             String   @id @db.Uuid
+  competition_enabled Boolean  @default(true)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }
 
 model IdempotencyKey {
