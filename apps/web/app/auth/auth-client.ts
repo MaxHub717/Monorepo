@@ -120,6 +120,35 @@ export async function register(
   });
 }
 
+export async function resendVerification(email: string) {
+  return authFetch<{ success: boolean; data: { success: boolean }; error: null }>('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyEmail(token: string) {
+  return authFetch<{ success: boolean; data: { success: boolean }; error: null }>('/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export type DevelopmentVerificationMessage = {
+  id: string;
+  to: string;
+  subject: string;
+  text: string;
+  verificationUrl: string;
+  createdAt: string;
+};
+
+export async function getDevelopmentMailbox(email: string) {
+  return authFetch<{ success: boolean; data: { messages: DevelopmentVerificationMessage[] }; error: null }>(
+    `/auth/dev-mailbox?email=${encodeURIComponent(email)}`,
+  );
+}
+
 export async function logout(): Promise<void> {
   await authFetch<{ success: boolean }>('/auth/logout', {
     method: 'POST',

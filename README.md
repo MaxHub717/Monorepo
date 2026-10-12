@@ -61,6 +61,12 @@ docker compose up --build --detach
 
 4. The frontend will be available at `http://localhost:3001`, and the API at `http://localhost:3000/api/v1`.
 
+**Local Email Verification**
+- Development uses the API's in-memory `DevMailer`; no SMTP server or external mail catcher is configured.
+- Verification links use `FRONTEND_BASE_URL` (defaults to `http://localhost:3001`). The Docker development stack sets this to the frontend URL.
+- After registration, open `http://localhost:3001/auth/dev-mailbox?email=you%40example.com`, select the verification message, then open its verification link. The inbox is memory-only and is cleared when the API restarts.
+- The development inbox route is disabled outside `NODE_ENV=development`. Tokens are not written to API logs or ordinary production responses. Production email delivery must be configured before allowing registrations.
+
 5. Verify services are healthy:
 
 ```bash

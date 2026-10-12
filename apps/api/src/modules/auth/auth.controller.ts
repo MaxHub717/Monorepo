@@ -1,18 +1,21 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service.js';
 import { AuthGuard, AccountStatusGuard } from '../../common/authz/authz.guards.js';
 import { Public } from '../../common/authz/authz.decorators.js';
-import { ForgotPasswordDto, LoginDto, LogoutDto, RefreshDto, RegisterDto, ResetPasswordDto, VerifyEmailDto } from './dto/auth.dto.js';
+import { DevelopmentMailboxDto, ForgotPasswordDto, LoginDto, LogoutDto, RefreshDto, RegisterDto, ResendVerificationDto, ResetPasswordDto, VerifyEmailDto } from './dto/auth.dto.js';
 
 @Controller('auth')
 export class AuthController {
@@ -32,8 +35,16 @@ export class AuthController {
 
   @Public()
   @Post('resend-verification')
-  async resendVerification(@Body('email') email: string) {
-    return this.authService.resendVerification(email);
+  @UseGuards(ThrottlerGuard)
+  async resendVerification(@Body() body: ResendVerificationDto) {
+    return this.authService.resendVerification(body.email);
+  }
+
+  @Public()
+  @Get('dev-mailbox')
+  @UseGuards(ThrottlerGuard)
+  async developmentMailbox(@Query() query: DevelopmentMailboxDto) {
+    return this.authService.getDevelopmentMailbox(query.email);
   }
 
   @Public()

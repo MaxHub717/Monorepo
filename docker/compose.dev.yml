@@ -34,6 +34,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
+      FRONTEND_BASE_URL: http://localhost:3001
       DATABASE_URL: postgresql://postgres:postgres@db:5432/nexgen_esport
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_API_BASE_URL: http://api:3000/api/v1

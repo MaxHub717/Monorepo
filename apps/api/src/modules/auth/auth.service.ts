@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import argon2 from 'argon2';
@@ -188,34 +189,46 @@ export class AuthService {
   }
 
   async resendVerification(email: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    return this.prisma.$transaction(async (tx: any) => {
+      const user = await tx.user.findUnique({
+        where: { email },
+        select: { id: true, email: true, account_status: true, email_verified_at: true },
+      });
 
-    if (!user) {
-      throw new BadRequestException('User not found');
+      if (!user || user.account_status !== 'PENDING' || user.email_verified_at) {
+        return { success: true };
+      }
+
+      const secret = crypto.randomBytes(24).toString('hex');
+      const id = crypto.randomUUID();
+      const token = `${id}.${secret}`;
+      const tokenHash = await argon2.hash(secret);
+
+      await tx.verificationToken.updateMany({
+        where: { user_id: user.id, purpose: 'EMAIL_VERIFY', consumed_at: null },
+        data: { consumed_at: new Date() },
+      });
+
+      await tx.verificationToken.create({
+        data: {
+          id,
+          user_id: user.id,
+          purpose: 'EMAIL_VERIFY',
+          token_hash: tokenHash,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+
+      await this.mailerService.sendVerificationEmail(email, token);
+      return { success: true };
+    });
+  }
+
+  getDevelopmentMailbox(email: string) {
+    if (this.config.get('NODE_ENV') !== 'development') {
+      throw new NotFoundException();
     }
-
-    const secret = crypto.randomBytes(24).toString('hex');
-    const id = crypto.randomUUID();
-    const token = `${id}.${secret}`;
-    const tokenHash = await argon2.hash(secret);
-
-    await this.prisma.verificationToken.create({
-      data: {
-        id,
-        user_id: user.id,
-        purpose: 'EMAIL_VERIFY',
-        token_hash: tokenHash,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      },
-    });
-
-    await this.mailerService.sendVerificationEmail(email, token);
-
-    return {
-      success: true,
-    };
+    return { messages: this.mailerService.getDevelopmentMessages(email) };
   }
 
   async forgotPassword(email: string) {

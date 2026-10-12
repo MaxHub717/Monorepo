@@ -6,10 +6,11 @@ import { EventModule } from '../events/event.module.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { MailerService, DevMailer } from './mailer.service.js';
 import { AuthzModule } from '../../common/authz/authz.module.js';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
   imports: [PrismaModule, EventModule, AuditModule, AuthzModule],
   controllers: [AuthController],
-  providers: [AuthService, { provide: MailerService, useClass: DevMailer }],
+  providers: [AuthService, ThrottlerGuard, { provide: MailerService, useClass: DevMailer }],
 })
 export class AuthModule {}

@@ -76,6 +76,16 @@ export class VerifyEmailDto {
   token!: string;
 }
 
+export class ResendVerificationDto {
+  @IsEmail()
+  email!: string;
+}
+
+export class DevelopmentMailboxDto {
+  @IsEmail()
+  email!: string;
+}
+
 export class ForgotPasswordDto {
   @IsEmail()
   email!: string;
