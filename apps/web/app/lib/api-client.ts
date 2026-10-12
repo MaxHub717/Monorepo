@@ -806,7 +806,7 @@ export type DivisionFixturePage = {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 };
 
-export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
+export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
 

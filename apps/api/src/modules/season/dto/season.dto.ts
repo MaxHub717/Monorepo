@@ -30,10 +30,6 @@ export class CreateSeasonDto {
   divisionType?: string;
 
   @IsOptional()
-  @IsIn(competitionFormats)
-  divisionFormat?: string;
-
-  @IsOptional()
   @IsInt()
   @Min(2)
   divisionCapacity?: number;
@@ -48,37 +44,6 @@ export class CreateSeasonDto {
   @Min(2)
   competitionParticipantCount?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  schedulingPeriodDays?: number;
-
-  /** Soft target per scheduling period; the complete fixture set is always retained. */
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  matchesPerParticipant?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(1439)
-  matchWindowStartMinutes?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(1440)
-  matchWindowEndMinutes?: number;
-
-  @IsOptional()
-  @IsString()
-  matchWindowTimezone?: string;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  concurrentMatches?: number;
 }
 
 export class CreateDivisionDto {

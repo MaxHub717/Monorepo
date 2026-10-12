@@ -379,8 +379,6 @@ export class SeasonService {
       capacity: dto.divisionCapacity,
       registrationCapacity: dto.registrationCapacity,
       competitionParticipantCount: dto.competitionParticipantCount,
-      matchWindowStartMinutes: dto.matchWindowStartMinutes,
-      matchWindowEndMinutes: dto.matchWindowEndMinutes,
     });
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -407,16 +405,9 @@ export class SeasonService {
           season_id: season.id,
           name: dto.divisionName?.trim() || 'Division 1',
           type: (dto.divisionType as DivisionType | undefined) ?? DivisionType.AMATEUR,
-          format: (dto.divisionFormat as CompetitionFormat | undefined) ?? CompetitionFormat.ROUND_ROBIN_SINGLE,
           capacity: dto.divisionCapacity ?? null,
           registration_capacity: dto.registrationCapacity ?? null,
           competition_participant_count: dto.competitionParticipantCount ?? null,
-          scheduling_period_days: dto.schedulingPeriodDays ?? 7,
-          matches_per_participant: dto.matchesPerParticipant ?? 1,
-          match_window_start_minutes: dto.matchWindowStartMinutes ?? null,
-          match_window_end_minutes: dto.matchWindowEndMinutes ?? null,
-          match_window_timezone: dto.matchWindowTimezone?.trim() || 'UTC',
-          concurrent_matches: dto.concurrentMatches ?? 1,
           description: 'Default player division',
         },
       });
@@ -855,23 +846,14 @@ export class SeasonService {
   }
 
   private assertNoLegacyFixtureConfig(
-    data: {
-      schedulingPeriodDays?: number;
-      matchesPerParticipant?: number;
-      matchWindowStartMinutes?: number | null;
-      matchWindowEndMinutes?: number | null;
-      matchWindowTimezone?: string;
-      concurrentMatches?: number;
-    },
+    data: object,
     operation: string,
   ) {
-    const legacyKeys: string[] = [];
-    if (data.schedulingPeriodDays !== undefined) legacyKeys.push('schedulingPeriodDays');
-    if (data.matchesPerParticipant !== undefined) legacyKeys.push('matchesPerParticipant');
-    if (data.concurrentMatches !== undefined) legacyKeys.push('concurrentMatches');
-    if (data.matchWindowStartMinutes !== undefined) legacyKeys.push('matchWindowStartMinutes');
-    if (data.matchWindowEndMinutes !== undefined) legacyKeys.push('matchWindowEndMinutes');
-    if (data.matchWindowTimezone !== undefined) legacyKeys.push('matchWindowTimezone');
+    const payload = data as Record<string, unknown>;
+    const legacyKeys = [
+      'schedulingPeriodDays', 'matchesPerParticipant', 'concurrentMatches',
+      'matchWindowStartMinutes', 'matchWindowEndMinutes', 'matchWindowTimezone',
+    ].filter((key) => payload[key] !== undefined);
     if (legacyKeys.length > 0) {
       throw new BadRequestException(
         `legacy Fixture density configuration is retired for ${operation}. Use canonical Phase/Plot/Series/Game rulesets and scheduling only.`,

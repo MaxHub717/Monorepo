@@ -10,7 +10,7 @@ describe('competition format handling', () => {
     expect(() => expectedRoundRobinFixtureCount(8, 'SWISS' as any)).toThrow('Unsupported competition format');
   });
 
-  it('creates a draft season without requiring or attaching a global ruleset', async () => {
+  it('creates a draft season and registration division without rules or legacy fixture configuration', async () => {
     const tx: any = {
       league: { findFirst: vi.fn().mockResolvedValue({ id: 'league-id' }) },
       season: { create: vi.fn().mockResolvedValue({ id: 'season-id' }) },
@@ -30,11 +30,19 @@ describe('competition format handling', () => {
       name: 'Season Test',
       startDate: '2026-01-01T00:00:00.000Z',
       endDate: '2026-12-31T00:00:00.000Z',
-      divisionFormat: 'ROUND_ROBIN_DOUBLE',
+      divisionCapacity: 16,
+      registrationCapacity: 32,
+      competitionParticipantCount: 12,
     });
 
     expect(tx.division.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ format: 'ROUND_ROBIN_DOUBLE' }),
+      data: expect.objectContaining({
+        season_id: 'season-id',
+        name: 'Division 1',
+        capacity: 16,
+        registration_capacity: 32,
+        competition_participant_count: 12,
+      }),
     }));
     expect(tx.season.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -43,6 +51,27 @@ describe('competition format handling', () => {
       }),
     }));
     expect(tx.season.create.mock.calls[0][0].data).not.toHaveProperty('ruleset_id');
+    const divisionData = tx.division.create.mock.calls[0][0].data;
+    for (const key of [
+      'format', 'scheduling_period_days', 'matches_per_participant', 'match_window_start_minutes',
+      'match_window_end_minutes', 'match_window_timezone', 'concurrent_matches',
+    ]) {
+      expect(divisionData).not.toHaveProperty(key);
+    }
+  });
+
+  it('continues rejecting retired density configuration sent directly to season creation', async () => {
+    const transaction = vi.fn();
+    const service = new SeasonService({ $transaction: transaction } as any, {} as any, {} as any, {} as any);
+
+    await expect(service.createSeason({
+      leagueId: '00000000-0000-4000-8000-000000000001',
+      name: 'Season Test',
+      startDate: '2026-01-01T00:00:00.000Z',
+      endDate: '2026-12-31T00:00:00.000Z',
+      schedulingPeriodDays: 7,
+    } as any)).rejects.toThrow('legacy Fixture density configuration is retired for createSeason');
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('blocks registration and activation when season rules are missing or invalid', async () => {
