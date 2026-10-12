@@ -611,6 +611,8 @@ model ClubMember {
 
 model CompetitionRuleset {
   id                     String                 @id @default(uuid()) @db.Uuid
+  season_id              String?                @db.Uuid
+  legacy_unassigned      Boolean                @default(false)
   name                   String
   version                String
   description            String?
@@ -623,12 +625,15 @@ model CompetitionRuleset {
   created_at             DateTime               @default(now()) @db.Timestamptz(6)
   updated_at             DateTime               @updatedAt @db.Timestamptz(6)
 
-  seasons                Season[]
-  supersedes             CompetitionRuleset?    @relation("CompetitionRulesetVersions", fields: [supersedes_ruleset_id], references: [id], onDelete: Restrict)
+  season                 Season?                @relation("SeasonRulesetVersions", fields: [season_id], references: [id], onDelete: Restrict)
+  currentForSeason       Season?                @relation("SeasonCurrentRuleset")
+  supersedes             CompetitionRuleset?    @relation("CompetitionRulesetVersions", fields: [supersedes_ruleset_id, season_id], references: [id, season_id], onDelete: Restrict, map: "competition_rulesets_supersedes_fkey")
   versions               CompetitionRuleset[]   @relation("CompetitionRulesetVersions")
 
-  @@unique([name, version])
+  @@unique([id, season_id])
+  @@unique([season_id, name, version])
   @@index([status, published_at])
+  @@index([season_id, status])
   @@map("competition_rulesets")
 }
 
@@ -652,7 +657,8 @@ model Season {
   deleted_at                 DateTime?    @db.Timestamptz(6)
 
   league                     League                @relation(fields: [league_id], references: [id])
-  ruleset                    CompetitionRuleset?   @relation(fields: [ruleset_id], references: [id], onDelete: Restrict)
+  ruleset                    CompetitionRuleset?   @relation("SeasonCurrentRuleset", fields: [ruleset_id, id], references: [id, season_id], onDelete: Restrict, map: "seasons_ruleset_id_fkey")
+  rulesets                   CompetitionRuleset[]  @relation("SeasonRulesetVersions")
   divisions                  Division[]
   phases                     Phase[]
   series                     Series[]
@@ -666,6 +672,7 @@ model Season {
   rewards                    Reward[]
 
   @@unique([league_id, name])
+  @@unique([ruleset_id, id])
   @@index([league_id, status])
   @@map("seasons")
 }
@@ -1018,7 +1025,6 @@ model Match {
   result       MatchResult?
   status_transitions MatchStatusTransition[]
   disputes     Dispute[]
-  penalties    Penalty[]
   penalties    Penalty[]
 
   @@index([season_id, division_id, status])

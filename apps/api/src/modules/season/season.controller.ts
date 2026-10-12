@@ -21,11 +21,6 @@ export class SeasonController {
     return this.seasonService.getOverview(id);
   }
 
-  @Get(':id/rules')
-  getPlayerFacingRules(@Param('id') id: string) {
-    return this.seasonService.getPlayerFacingRules(id);
-  }
-
   @Post()
   @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
   @RequirePermission(PermissionName.MANAGE_SEASONS)

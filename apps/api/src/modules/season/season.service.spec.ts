@@ -10,12 +10,9 @@ describe('competition format handling', () => {
     expect(() => expectedRoundRobinFixtureCount(8, 'SWISS' as any)).toThrow('Unsupported competition format');
   });
 
-  it('persists an explicitly selected format when creating a season', async () => {
+  it('creates a draft season without requiring or attaching a global ruleset', async () => {
     const tx: any = {
       league: { findFirst: vi.fn().mockResolvedValue({ id: 'league-id' }) },
-      competitionRuleset: { findFirst: vi.fn().mockResolvedValue({
-        id: 'ruleset-id', name: 'Standard Competition', version: '1.0.0', status: 'PUBLISHED', rules: DEFAULT_COMPETITION_RULES, rules_hash: 'hash-1',
-      }) },
       season: { create: vi.fn().mockResolvedValue({ id: 'season-id' }) },
       division: { create: vi.fn().mockResolvedValue({ id: 'division-id' }) },
       auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-id' }) },
@@ -41,18 +38,47 @@ describe('competition format handling', () => {
     }));
     expect(tx.season.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        ruleset_id: 'ruleset-id',
-        ruleset_name: 'Standard Competition',
-        ruleset_version: '1.0.0',
-        competition_config: expect.objectContaining({ rules: DEFAULT_COMPETITION_RULES, rulesHash: 'hash-1' }),
+        status: 'DRAFT',
+        name: 'Season Test',
       }),
     }));
-    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        action: 'SEASON_RULESET_ATTACHED',
-        after_state: expect.objectContaining({ rulesetId: 'ruleset-id', rulesetVersion: '1.0.0' }),
-      }),
-    }));
+    expect(tx.season.create.mock.calls[0][0].data).not.toHaveProperty('ruleset_id');
+  });
+
+  it('blocks registration and activation when season rules are missing or invalid', async () => {
+    const missingRulesTx: any = {
+      season: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'season-id', status: 'DRAFT', start_date: new Date('2026-01-01'), end_date: new Date('2026-12-31'), ruleset: null,
+        }),
+        update: vi.fn(),
+      },
+    };
+    const missingRulesService = new SeasonService(
+      { $transaction: (callback: any) => callback(missingRulesTx) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    await expect(missingRulesService.publishSeason('season-id')).rejects.toThrow('Configure and save valid rules');
+    expect(missingRulesTx.season.update).not.toHaveBeenCalled();
+
+    const invalidRulesTx: any = {
+      season: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'season-id', status: 'ROSTER_LOCKED', ruleset: { season_id: 'season-id', rules: { seriesGameRules: { gamesPerSeries: 2 } } },
+        }),
+        update: vi.fn(),
+      },
+    };
+    const invalidRulesService = new SeasonService(
+      { $transaction: (callback: any) => callback(invalidRulesTx) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    await expect(invalidRulesService.activateSeason('season-id')).rejects.toThrow('Season rules are invalid');
+    expect(invalidRulesTx.season.update).not.toHaveBeenCalled();
   });
 
   it('rejects changing format after a division has fixtures', async () => {
@@ -89,7 +115,7 @@ describe('competition format handling', () => {
     }));
     const tx: any = {
       season: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED', ruleset: { season_id: 'season-id', rules: DEFAULT_COMPETITION_RULES } }),
         update: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ACTIVE' }),
       },
       phase: { findMany: vi.fn().mockResolvedValue([]) },
@@ -135,7 +161,7 @@ describe('competition format handling', () => {
 
   it('rejects activation when a schedule has not been locked', async () => {
     const tx: any = {
-      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED', ruleset: { season_id: 'season-id', rules: DEFAULT_COMPETITION_RULES } }) },
       phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
@@ -172,7 +198,7 @@ describe('competition format handling', () => {
 
   it('rejects activation when a locked schedule still requires validation', async () => {
     const tx: any = {
-      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }) },
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED', ruleset: { season_id: 'season-id', rules: DEFAULT_COMPETITION_RULES } }) },
       phase: { findMany: vi.fn().mockResolvedValue([]) },
       division: {
         findMany: vi.fn().mockResolvedValue([{
@@ -216,7 +242,7 @@ describe('competition format handling', () => {
     }));
     const tx: any = {
       season: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED' }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'season-id', status: 'ROSTER_LOCKED', ruleset: { season_id: 'season-id', rules: DEFAULT_COMPETITION_RULES } }),
         update: vi.fn(),
       },
       phase: { findMany: vi.fn().mockResolvedValue([]) },
@@ -276,6 +302,7 @@ describe('competition format handling', () => {
         findUnique: vi.fn().mockResolvedValue({
           id: 'season-id',
           status: 'ROSTER_LOCKED',
+          ruleset: { season_id: 'season-id', rules: DEFAULT_COMPETITION_RULES },
         }),
       },
       phase: { findMany: vi.fn().mockResolvedValue([]) },
@@ -336,6 +363,7 @@ describe('SeasonService competition-field activation readiness', () => {
           start_date: new Date('2026-01-01T00:00:00Z'),
           end_date: new Date('2026-12-31T00:00:00Z'),
           competition_timezone: 'UTC',
+          ruleset: { id: 'ruleset-id', season_id: 'season-id', name: 'Season 1 Rules', version: '1.0.0', status: 'DRAFT', rules: DEFAULT_COMPETITION_RULES, rules_hash: null, published_at: null },
           registration_open_at: null,
           registration_close_at: null,
           league: { id: 'league-id', name: 'NGL Professional', status: 'ACTIVE' },

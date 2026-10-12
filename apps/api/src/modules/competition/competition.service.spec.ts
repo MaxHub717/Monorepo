@@ -11,6 +11,7 @@ const attendancePlayerIds = [
 function createAttendanceFixture(overrides: Record<string, unknown> = {}) {
   const series = {
     id: attendanceSeriesId,
+    season_id: 'season-execution',
     phase_id: '30000000-0000-4000-8000-000000000001',
     phase: { id: '30000000-0000-4000-8000-000000000001', phase_number: 1, name: 'Opening Phase', status: 'ACTIVE', schedule_locked: true },
     status: 'SCHEDULED',
@@ -22,7 +23,7 @@ function createAttendanceFixture(overrides: Record<string, unknown> = {}) {
     match_window_end: new Date('2027-01-04T13:00:00.000Z'),
     match_window_timezone: 'UTC',
     results_deadline_at: new Date('2027-01-04T13:30:00.000Z'),
-    season: { competition_timezone: 'UTC', ruleset: null },
+    season: { competition_timezone: 'UTC', ruleset: { season_id: 'season-execution', rules: DEFAULT_COMPETITION_RULES } },
     games: [{ game_number: 1, home_player_id: attendancePlayerIds[0], away_player_id: attendancePlayerIds[1] }],
     check_ins: [],
     ...overrides,
@@ -90,12 +91,13 @@ function createExecutionFixture(input: {
   });
   const series = {
     id: attendanceSeriesId,
+    season_id: 'season-execution',
     status: input.status ?? 'IN_PROGRESS',
     participant_player_ids: attendancePlayerIds,
     schedule_key: 'execution-schedule-key',
     phase_id: '30000000-0000-4000-8000-000000000001',
     phase: { id: '30000000-0000-4000-8000-000000000001', phase_number: 1, name: 'Opening Phase', status: 'ACTIVE', schedule_locked: true },
-    season: { id: 'season-execution', name: 'Execution Season', competition_timezone: 'UTC', ruleset: null },
+    season: { id: 'season-execution', name: 'Execution Season', competition_timezone: 'UTC', ruleset: { season_id: 'season-execution', rules: DEFAULT_COMPETITION_RULES } },
     plot: { id: 'plot-execution', name: 'Plot 1' },
     check_in_opens_at: new Date('2027-01-04T11:00:00.000Z'),
     check_in_closes_at: new Date('2027-01-04T11:30:00.000Z'),
@@ -144,9 +146,19 @@ function createExecutionFixture(input: {
 }
 
 describe('Competition ruleset administration', () => {
-  it('creates a draft, previews generated player rules, and publishes an immutable version with an audit hash', async () => {
+  it('does not generate a schedule for a season without its own rules', async () => {
+    const tx = { season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-1', ruleset: null }) } };
+    const prisma = { $transaction: (callback: (transaction: typeof tx) => unknown) => callback(tx) };
+    const service = new CompetitionService(prisma as any, {} as any);
+
+    await expect(service.generateSchedule('season-1', {})).rejects.toThrow('Configure valid rules for this season');
+  });
+
+  it('creates, previews, and publishes rules owned by one season', async () => {
     const draft = {
       id: 'ruleset-1',
+      season_id: 'season-1',
+      legacy_unassigned: false,
       name: 'Standard Competition',
       version: '1.0.0',
       description: null,
@@ -167,28 +179,34 @@ describe('Competition ruleset administration', () => {
     const tx = {
       competitionRuleset: {
         create: vi.fn().mockResolvedValue(draft),
-        findUnique: vi.fn().mockResolvedValueOnce(draft).mockResolvedValueOnce(draft),
+        findUnique: vi.fn().mockResolvedValue(draft),
         update: vi.fn().mockResolvedValue(published),
-        findMany: vi.fn(),
+      },
+      season: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'season-1', name: 'Season 1', status: 'DRAFT', ruleset: null }),
+        update: vi.fn().mockResolvedValue({ id: 'season-1' }),
       },
       auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-1' }) },
     };
     const prisma = {
-      competitionRuleset: { findUnique: vi.fn().mockResolvedValue(draft) },
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-1', name: 'Season 1', status: 'DRAFT', ruleset: draft }) },
       $transaction: (callback: (transaction: typeof tx) => unknown) => callback(tx),
     };
     const service = new CompetitionService(prisma as any, {} as any);
 
-    await service.createRuleset({ name: draft.name, version: draft.version, rules: DEFAULT_COMPETITION_RULES }, { id: 'admin-1', role: 'HQ_ADMIN' });
+    await service.saveSeasonRules('season-1', DEFAULT_COMPETITION_RULES, { id: 'admin-1', role: 'HQ_ADMIN' });
     expect(tx.competitionRuleset.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: 'DRAFT', rules: DEFAULT_COMPETITION_RULES }),
+      data: expect.objectContaining({ season_id: 'season-1', legacy_unassigned: false, status: 'DRAFT', rules: DEFAULT_COMPETITION_RULES }),
+    }));
+    expect(tx.season.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'season-1' }, data: expect.objectContaining({ ruleset_id: draft.id }),
     }));
 
-    const preview = await service.previewRuleset(draft.id);
+    const preview = await service.previewSeasonRules('season-1');
     expect(preview.playerFacing.version).toBe('1.0.0');
     expect(preview.playerFacing.text).toContain('draw eliminates both participants');
 
-    const result = await service.publishRuleset(draft.id, { id: 'admin-1', role: 'HQ_ADMIN' });
+    const result = await service.publishSeasonRules('season-1', { id: 'admin-1', role: 'HQ_ADMIN' });
     expect(result.rules_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(tx.competitionRuleset.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: draft.id },
@@ -199,9 +217,11 @@ describe('Competition ruleset administration', () => {
     }));
   });
 
-  it('refuses draft edits to published rulesets and renders a Season’s attached historical version', async () => {
+  it('rejects cross-season rules access and invalid rule documents with useful messages', async () => {
     const publishedRuleset = {
       id: 'ruleset-old',
+      season_id: 'another-season',
+      legacy_unassigned: false,
       name: 'Standard Competition',
       version: '1.0.0',
       description: null,
@@ -212,33 +232,16 @@ describe('Competition ruleset administration', () => {
       published_by_id: 'admin-1',
       supersedes_ruleset_id: null,
     };
-    const tx = {
-      competitionRuleset: {
-        findUnique: vi.fn().mockResolvedValue(publishedRuleset),
-        update: vi.fn(),
-      },
-      auditLog: { create: vi.fn() },
-    };
+    const tx = { season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-1', name: 'Season 1', status: 'DRAFT', ruleset: publishedRuleset }) } };
     const prisma = {
       $transaction: (callback: (transaction: typeof tx) => unknown) => callback(tx),
-      season: { findUnique: vi.fn().mockResolvedValue({
-        id: 'season-1',
-        ruleset_id: publishedRuleset.id,
-        ruleset_name: 'Standard Competition',
-        ruleset_version: '1.0.0',
-        ruleset: publishedRuleset,
-      }) },
+      season: { findUnique: vi.fn().mockResolvedValue({ id: 'season-1', ruleset: publishedRuleset }) },
     };
     const service = new CompetitionService(prisma as any, {} as any);
 
-    await expect(service.updateDraftRuleset(publishedRuleset.id, { rules: DEFAULT_COMPETITION_RULES }, {}))
-      .rejects.toThrow('Published rulesets are immutable');
-    expect(tx.competitionRuleset.update).not.toHaveBeenCalled();
-
-    const playerRules = await service.getSeasonRules('season-1');
-    expect(playerRules.rulesetVersion).toBe('1.0.0');
-    expect(playerRules.rulesHash).toBe('b'.repeat(64));
-    expect(playerRules.playerFacing.text).toContain('version 1.0.0');
+    await expect(service.getSeasonRules('season-1')).rejects.toThrow('does not belong to this season');
+    await expect(service.saveSeasonRules('season-1', { ...DEFAULT_COMPETITION_RULES, seriesGameRules: { gamesPerSeries: 2 } }, {}))
+      .rejects.toThrow('A Series must contain exactly three Games.');
   });
 });
 

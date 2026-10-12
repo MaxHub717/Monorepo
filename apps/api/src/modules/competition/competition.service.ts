@@ -34,7 +34,7 @@ import {
 
 const workspaceInclude = {
   league: { select: { name: true } },
-  ruleset: { select: { rules: true } },
+  ruleset: { select: { rules: true, season_id: true } },
   phases: {
     orderBy: { phase_number: 'asc' as const },
     include: {
@@ -189,102 +189,13 @@ export class CompetitionService {
     return validateCompetitionRules(DEFAULT_COMPETITION_RULES);
   }
 
-  async listRulesets(publishedOnly = false) {
-    return this.prisma.competitionRuleset.findMany({
-      where: publishedOnly ? { status: 'PUBLISHED' } : undefined,
-      select: {
-        id: true, name: true, version: true, description: true, status: true, rules_hash: true,
-        published_at: true, supersedes_ruleset_id: true, created_at: true,
-      },
-      orderBy: [{ name: 'asc' }, { created_at: 'desc' }],
-    });
-  }
-
-  async createRuleset(input: {
-    name: string;
-    version: string;
-    description?: string;
-    rules: Record<string, unknown>;
-    supersedesRulesetId?: string;
-  }, actor: RulesetActor) {
-    const name = input.name.trim();
-    const version = input.version.trim();
-    if (!name || !version) throw new BadRequestException('Ruleset name and version are required.');
-    const rules = validateCompetitionRules(input.rules);
-
-    return this.prisma.$transaction(async (tx) => {
-      if (input.supersedesRulesetId) {
-        const previous = await tx.competitionRuleset.findUnique({ where: { id: input.supersedesRulesetId } });
-        if (!previous || previous.status !== 'PUBLISHED' || previous.name !== name) {
-          throw new BadRequestException('A new ruleset version must supersede a published version with the same name.');
-        }
-      }
-      const ruleset = await tx.competitionRuleset.create({
-        data: {
-          name,
-          version,
-          description: input.description?.trim() || null,
-          status: 'DRAFT',
-          rules: rules as Prisma.InputJsonValue,
-          supersedes_ruleset_id: input.supersedesRulesetId,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity_type: 'CompetitionRuleset', entity_id: ruleset.id, action: 'RULESET_DRAFT_CREATED',
-          actor_id: actor.id, actor_role: actor.role, request_id: actor.requestId,
-          after_state: { name, version, rules: rules as unknown as Prisma.InputJsonValue },
-        },
-      });
-      return ruleset;
-    });
-  }
-
-  async updateDraftRuleset(rulesetId: string, input: { name?: string; description?: string; rules?: Record<string, unknown> }, actor: RulesetActor) {
-    return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.competitionRuleset.findUnique({ where: { id: rulesetId } });
-      if (!existing) throw new NotFoundException('Ruleset not found.');
-      if (existing.status !== 'DRAFT') throw new BadRequestException('Published rulesets are immutable; create a new version.');
-      const nextRules = input.rules === undefined
-        ? validateCompetitionRules(existing.rules)
-        : validateCompetitionRules(input.rules);
-      const updated = await tx.competitionRuleset.update({
-        where: { id: rulesetId },
-        data: {
-          name: input.name === undefined ? undefined : input.name.trim(),
-          description: input.description === undefined ? undefined : input.description.trim() || null,
-          rules: nextRules as Prisma.InputJsonValue,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity_type: 'CompetitionRuleset', entity_id: rulesetId, action: 'RULESET_DRAFT_UPDATED',
-          actor_id: actor.id, actor_role: actor.role, request_id: actor.requestId,
-          before_state: { name: existing.name, description: existing.description, rules: existing.rules },
-          after_state: { name: updated.name, description: updated.description, rules: nextRules as unknown as Prisma.InputJsonValue },
-        },
-      });
-      return updated;
-    });
-  }
-
-  async previewRuleset(rulesetId: string) {
-    const ruleset = await this.prisma.competitionRuleset.findUnique({ where: { id: rulesetId } });
-    if (!ruleset) throw new NotFoundException('Ruleset not found.');
-    const rules = validateCompetitionRules(ruleset.rules);
-    return {
-      id: ruleset.id,
-      status: ruleset.status,
-      rules,
-      rulesHash: hashRules(rules),
-      playerFacing: buildPlayerFacingRules(rules, { name: ruleset.name, version: ruleset.version }),
-    };
-  }
-
   async publishRuleset(rulesetId: string, actor: RulesetActor) {
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.competitionRuleset.findUnique({ where: { id: rulesetId } });
       if (!existing) throw new NotFoundException('Ruleset not found.');
+      if (!existing.season_id || existing.legacy_unassigned) {
+        throw new BadRequestException('Only rules owned by a season can be published.');
+      }
       if (existing.status !== 'DRAFT') throw new BadRequestException('Ruleset is already published and immutable.');
       const rules = validateCompetitionRules(existing.rules);
       const publishedAt = new Date();
@@ -318,22 +229,133 @@ export class CompetitionService {
     });
     if (!season) throw new NotFoundException('Season not found.');
     if (!season.ruleset) {
-      return { available: false, seasonId, rulesetName: season.ruleset_name, rulesetVersion: season.ruleset_version, playerFacing: null };
+      return {
+        available: false,
+        seasonId,
+        status: 'NOT_CONFIGURED',
+        rules: null,
+        playerFacing: null,
+      };
     }
-    const rules = validateCompetitionRules(season.ruleset.rules);
+    if (season.ruleset.season_id !== seasonId) {
+      throw new ForbiddenException('The attached ruleset does not belong to this season.');
+    }
+    let rules;
+    try {
+      rules = validateCompetitionRules(season.ruleset.rules);
+    } catch (error) {
+      return { available: false, seasonId, status: 'INCOMPLETE', rules: season.ruleset.rules, playerFacing: null,
+        validationMessage: error instanceof Error ? error.message : 'Competition rules are invalid.' };
+    }
     return {
       available: true,
       seasonId,
+      status: season.ruleset.status === 'PUBLISHED' ? 'PUBLISHED' : 'VALID',
       rulesetId: season.ruleset.id,
       rulesetName: season.ruleset_name ?? season.ruleset.name,
       rulesetVersion: season.ruleset_version ?? season.ruleset.version,
       rulesHash: season.ruleset.rules_hash,
+      rules,
       publishedAt: season.ruleset.published_at?.toISOString() ?? null,
       playerFacing: buildPlayerFacingRules(rules, {
         name: season.ruleset_name ?? season.ruleset.name,
         version: season.ruleset_version ?? season.ruleset.version,
       }),
     };
+  }
+
+  async saveSeasonRules(seasonId: string, input: Record<string, unknown>, actor: RulesetActor) {
+    let rules;
+    try {
+      rules = validateCompetitionRules(input);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Competition rules are invalid.');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const season = await tx.season.findUnique({ where: { id: seasonId }, include: { ruleset: true } });
+      if (!season) throw new NotFoundException('Season not found.');
+      if (season.ruleset && season.ruleset.season_id !== seasonId) {
+        throw new ForbiddenException('The attached ruleset does not belong to this season.');
+      }
+      if (season.status !== 'DRAFT') {
+        throw new BadRequestException('Season rules can only be changed while the season is a draft.');
+      }
+      const current = season.ruleset;
+      const version = current?.status === 'PUBLISHED'
+        ? this.nextRulesVersion(current.version)
+        : current?.version ?? '1.0.0';
+      const name = current?.name ?? `${season.name} Rules`;
+      const updatedRuleset = current?.status === 'DRAFT'
+        ? await tx.competitionRuleset.update({
+            where: { id: current.id },
+            data: { rules: rules as Prisma.InputJsonValue },
+          })
+        : await tx.competitionRuleset.create({
+            data: {
+              season_id: seasonId,
+              legacy_unassigned: false,
+              name,
+              version,
+              status: 'DRAFT',
+              rules: rules as Prisma.InputJsonValue,
+              supersedes_ruleset_id: current?.id,
+            },
+          });
+      await tx.season.update({
+        where: { id: seasonId },
+        data: {
+          ruleset_id: updatedRuleset.id,
+          ruleset_name: updatedRuleset.name,
+          ruleset_version: updatedRuleset.version,
+          competition_config: { rules, rulesHash: hashRules(rules) } as Prisma.InputJsonValue,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity_type: 'CompetitionRuleset',
+          entity_id: updatedRuleset.id,
+          action: current?.status === 'DRAFT' ? 'SEASON_RULES_DRAFT_UPDATED' : 'SEASON_RULES_DRAFT_CREATED',
+          actor_id: actor.id,
+          actor_role: actor.role,
+          request_id: actor.requestId,
+          before_state: current?.status === 'DRAFT' ? { rules: current.rules } : undefined,
+          after_state: { seasonId, name, version, rules: rules as unknown as Prisma.InputJsonValue },
+        },
+      });
+      return updatedRuleset;
+    });
+  }
+
+  private nextRulesVersion(version: string) {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+    return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : `${version}.1`;
+  }
+
+  async previewSeasonRules(seasonId: string) {
+    const result = await this.getSeasonRules(seasonId);
+    if (!result.available || !result.rules || !result.playerFacing) {
+      throw new BadRequestException(result.validationMessage ?? 'Configure and save valid rules for this season before previewing.');
+    }
+    return result;
+  }
+
+  async getPlayerFacingSeasonRules(seasonId: string) {
+    const result = await this.getSeasonRules(seasonId);
+    return {
+      available: result.available,
+      seasonId,
+      status: result.status,
+      playerFacing: result.playerFacing ?? null,
+    };
+  }
+
+  async publishSeasonRules(seasonId: string, actor: RulesetActor) {
+    const season = await this.prisma.season.findUnique({ where: { id: seasonId }, include: { ruleset: true } });
+    if (!season) throw new NotFoundException('Season not found.');
+    if (!season.ruleset || season.ruleset.season_id !== seasonId) {
+      throw new BadRequestException('Save valid rules for this season before publishing them.');
+    }
+    return this.publishRuleset(season.ruleset.id, actor);
   }
 
   async getWorkspace(seasonId: string, canManageCompetitionExceptions = false) {
@@ -346,7 +368,10 @@ export class CompetitionService {
       ? await this.prisma.playerProfile.findMany({ where: { id: { in: playerIds } }, select: { id: true, gamer_tag: true } })
       : [];
     const gamerTags = new Map(profiles.map((profile) => [profile.id, profile.gamer_tag]));
-    const attendancePolicy = validateCompetitionRules(season.ruleset?.rules ?? DEFAULT_COMPETITION_RULES).checkIn.attendancePolicy as string;
+    const seasonRules = season.ruleset?.season_id === seasonId
+      ? validateCompetitionRules(season.ruleset.rules)
+      : null;
+    const attendancePolicy = seasonRules?.checkIn.attendancePolicy as string ?? 'RULES_NOT_CONFIGURED';
     const validation = validateSeriesSchedule(getValidationInput(season));
     const currentPhase = season.phases.find((phase) => phase.status === 'ACTIVE')
       ?? [...season.phases].reverse().find((phase) => phase.status !== 'COMPLETED');
@@ -484,7 +509,7 @@ export class CompetitionService {
                 }
               }
               let canStart = false;
-              if (series.match_window_start && series.match_window_end) {
+              if (seasonRules && series.match_window_start && series.match_window_end) {
                 try {
                   assertSeriesCanStart({
                     status: series.status,
@@ -1597,7 +1622,10 @@ export class CompetitionService {
       }
       if (!series.phase.schedule_locked) throw new BadRequestException('The Phase schedule must be locked before Series execution.');
       const playerIds = getParticipants(series);
-      const attendancePolicy = validateCompetitionRules(series.season.ruleset?.rules ?? DEFAULT_COMPETITION_RULES).checkIn.attendancePolicy as string;
+      if (!series.season.ruleset || series.season.ruleset.season_id !== series.season_id) {
+        throw new BadRequestException('Series execution requires valid rules owned by its season.');
+      }
+      const attendancePolicy = validateCompetitionRules(series.season.ruleset.rules).checkIn.attendancePolicy as string;
       try {
         assertSeriesCanStart({
           status: series.status,
@@ -1873,6 +1901,14 @@ export class CompetitionService {
     const result = await this.prisma.$transaction(async (tx) => {
       const season = await tx.season.findUnique({ where: { id: seasonId }, include: workspaceInclude });
       if (!season) throw new NotFoundException('Season not found');
+      if (!season.ruleset || season.ruleset.season_id !== seasonId) {
+        throw new BadRequestException('Configure valid rules for this season before generating its schedule.');
+      }
+      try {
+        validateCompetitionRules(season.ruleset.rules);
+      } catch (error) {
+        throw new BadRequestException(`Season rules are invalid: ${error instanceof Error ? error.message : 'validation failed'}`);
+      }
       if (season.status !== 'ROSTER_LOCKED') throw new BadRequestException('Lock the participant roster before generating a competition schedule.');
       if (!season.start_date || !season.end_date) throw new BadRequestException('Season dates are required before schedule generation.');
       if (season.phases.some((phase) => phase.schedule_locked)) throw new BadRequestException('A locked Phase schedule cannot be regenerated.');

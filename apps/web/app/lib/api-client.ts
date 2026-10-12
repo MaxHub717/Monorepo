@@ -3,6 +3,13 @@ import type { ApiEnvelope } from '@nexgen/shared';
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 export type UserProfile = {
   id: string;
   email: string;
@@ -136,7 +143,7 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const request = () => fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: 'include',
     headers: {
@@ -144,6 +151,16 @@ export async function apiFetch<T>(
       ...options.headers,
     },
   });
+  let response = await request();
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    const refreshed = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (refreshed.ok) response = await request();
+  }
 
   const payload = (await response.json().catch(() => null)) as
     | ApiEnvelope<T>
@@ -156,13 +173,13 @@ export async function apiFetch<T>(
     | null;
 
   if (!response.ok) {
-    throw new Error(
-      payload &&
-        'error' in payload &&
-        payload.error?.message
-        ? payload.error.message
-        : 'API request failed',
-    );
+    const error = payload && 'error' in payload ? payload.error : undefined;
+    const message = response.status === 401
+      ? 'Your session is missing or expired. Sign in again to continue.'
+      : response.status === 403
+        ? 'You are signed in but do not have permission to manage this season.'
+        : error?.message ?? `API request failed (${response.status}).`;
+    throw new ApiRequestError(message, response.status, error?.code);
   }
 
   if (
@@ -397,37 +414,42 @@ export type CompetitionRulesPreview = {
   playerFacing: { name: string; version: string; sections: Array<{ title: string; items: string[] }>; text: string };
 };
 
-export async function getDefaultCompetitionRules(): Promise<CompetitionRulesDocument> {
-  return apiFetch<CompetitionRulesDocument>('/competition/rulesets/defaults', { cache: 'no-store' });
+export type SeasonRulesWorkspace = {
+  available: boolean;
+  seasonId: string;
+  status: 'NOT_CONFIGURED' | 'INCOMPLETE' | 'VALID' | 'PUBLISHED';
+  rules?: CompetitionRulesDocument | null;
+  validationMessage?: string;
+  rulesetId?: string;
+  rulesetName?: string;
+  rulesetVersion?: string;
+  rulesHash?: string | null;
+  playerFacing?: CompetitionRulesPreview['playerFacing'] | null;
+};
+
+export async function getSeasonRules(seasonId: string): Promise<SeasonRulesWorkspace> {
+  return apiFetch<SeasonRulesWorkspace>(`/seasons/${seasonId}/rules`, { cache: 'no-store' });
 }
 
-export async function listCompetitionRulesets(publishedOnly = false): Promise<CompetitionRulesetSummary[]> {
-  return apiFetch<CompetitionRulesetSummary[]>(`/competition/rulesets${publishedOnly ? '?publishedOnly=true' : ''}`, { cache: 'no-store' });
+export async function saveSeasonRules(seasonId: string, rules: CompetitionRulesDocument): Promise<CompetitionRulesetSummary> {
+  return apiFetch<CompetitionRulesetSummary>(`/seasons/${seasonId}/rules`, {
+    method: 'PUT',
+    body: JSON.stringify({ rules }),
+  });
 }
 
-export async function createCompetitionRuleset(input: {
-  name: string; version: string; description?: string; rules: CompetitionRulesDocument; supersedesRulesetId?: string;
-}): Promise<CompetitionRulesetSummary> {
-  return apiFetch<CompetitionRulesetSummary>('/competition/rulesets', { method: 'POST', body: JSON.stringify(input) });
+export async function previewSeasonRules(seasonId: string): Promise<SeasonRulesWorkspace> {
+  return apiFetch<SeasonRulesWorkspace>(`/seasons/${seasonId}/rules/preview`, { cache: 'no-store' });
 }
 
-export async function updateCompetitionRuleset(rulesetId: string, input: {
-  name?: string; description?: string; rules?: CompetitionRulesDocument;
-}): Promise<CompetitionRulesetSummary> {
-  return apiFetch<CompetitionRulesetSummary>(`/competition/rulesets/${rulesetId}`, { method: 'PUT', body: JSON.stringify(input) });
-}
-
-export async function previewCompetitionRuleset(rulesetId: string): Promise<CompetitionRulesPreview> {
-  return apiFetch<CompetitionRulesPreview>(`/competition/rulesets/${rulesetId}/preview`, { cache: 'no-store' });
-}
-
-export async function publishCompetitionRuleset(rulesetId: string): Promise<CompetitionRulesetSummary> {
-  return apiFetch<CompetitionRulesetSummary>(`/competition/rulesets/${rulesetId}/publish`, { method: 'POST' });
+export async function publishSeasonRules(seasonId: string): Promise<CompetitionRulesetSummary> {
+  return apiFetch<CompetitionRulesetSummary>(`/seasons/${seasonId}/rules/publish`, { method: 'POST' });
 }
 
 export type SeasonOverview = SeasonSummary & {
   counts: { participants: number; divisions: number; fixtures: number; matches: number; pendingResults: number; disputes: number; penalties: number; confirmedMatches: number };
   ruleset: { id: string; name: string; version: string; status: string; publishedAt: string | null; rulesHash: string | null } | null;
+  rulesStatus: 'NOT_CONFIGURED' | 'DRAFT' | 'VALID' | 'PUBLISHED';
   playerFacingRules: { name: string; version: string; sections: Array<{ title: string; items: string[] }>; text: string } | null;
   divisions: Array<{ id: string; name: string; type: string; format: string; capacity: number | null; active: boolean; _count: { participants: number; fixtures: number; matches: number; standings_rows: number } }>;
   nextAction: { label: string; endpoint: string; reason: string } | null;
@@ -784,7 +806,7 @@ export type DivisionFixturePage = {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 };
 
-export async function createSeason(payload: { leagueId: string; rulesetId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
+export async function createSeason(payload: { leagueId: string; name: string; description?: string; startDate: string; endDate: string; divisionName?: string; divisionType?: string; divisionFormat?: string; divisionCapacity?: number; registrationCapacity?: number; competitionParticipantCount?: number; schedulingPeriodDays?: number; matchesPerParticipant?: number; matchWindowStartMinutes?: number; matchWindowEndMinutes?: number; matchWindowTimezone?: string; concurrentMatches?: number }): Promise<SeasonSummary> {
   return apiFetch<SeasonSummary>('/seasons', { method: 'POST', body: JSON.stringify(payload) });
 }
 

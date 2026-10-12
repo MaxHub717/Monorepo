@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FixtureService, buildRoundRobin, distributeFixtures, ensureMatchWeeks, validateGeneratedSchedule } from './fixture.service.js';
 import { SeasonService } from '../season/season.service.js';
 import { MAX_FIXTURES_PER_GENERATION, resolveCompetitionParticipantCount } from '../season/competition-field.js';
+import { DEFAULT_COMPETITION_RULES } from '../competition/competition.domain.js';
 
 describe('ensureMatchWeeks', () => {
   it('reuses existing weeks and only creates missing week numbers', async () => {
@@ -63,6 +64,7 @@ describe('ensureMatchWeeks', () => {
         status: 'ROSTER_LOCKED',
         start_date: new Date('2026-10-07T00:00:00.000Z'),
         end_date: new Date('2026-12-31T23:59:59.999Z'),
+        ruleset: { season_id: 'season-1', rules: DEFAULT_COMPETITION_RULES },
       };
       const division: any = {
         id: 'division-1',

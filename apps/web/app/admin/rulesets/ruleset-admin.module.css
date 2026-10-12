@@ -1,4 +1,15 @@
 .page { display: grid; gap: 18px; color: #17211b; }
+.rulesForm { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
+.area { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 15px; border: 1px solid #d8e2da; border-radius: 5px; background: #fff; }
+.area legend { padding: 0 7px; color: #17633d; font-size: .88rem; font-weight: 800; }
+.rule { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .8fr); align-items: center; gap: 10px; color: #34443a; font-size: .76rem; font-weight: 700; }
+.rule > span { display: grid; gap: 3px; }
+.rule small { color: #66736a; font-size: .66rem; font-weight: 500; line-height: 1.4; }
+.rule input:not([type="checkbox"]), .rule select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #cbd7cd; border-radius: 4px; padding: 7px 8px; background: #fff; color: #17211b; font: inherit; font-size: .74rem; }
+.rule input[type="checkbox"] { justify-self: start; accent-color: #17633d; }
+.rule input:disabled, .rule select:disabled { background: #f0f3f0; color: #56645a; }
+.checks { display: flex; flex-wrap: wrap; gap: 7px 10px; }
+.check { display: inline-flex; align-items: center; gap: 4px; color: #56645a; font-size: .65rem; font-weight: 650; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 18px 20px; border: 1px solid #d8e2da; border-radius: 6px; background: linear-gradient(110deg, #eff6f0, #fff 72%); }
 .header h2, .editorHeader h3, .listHeading h3, .preview h3 { margin: 0; }
 .header > div > p:last-child { margin: 7px 0 0; color: #66736a; }
@@ -32,8 +43,12 @@
 .message, .error { margin: 0; padding: 10px 12px; border-left: 4px solid #17633d; background: #eff6f0; color: #245137; font-size: .78rem; }
 .error { border-left-color: #a54e30; background: #fbf0eb; color: #853d22; }
 .preview { display: grid; gap: 11px; padding-top: 14px; border-top: 1px solid #e4ebe5; }
+.preview details { padding: 9px 0; border-top: 1px solid #e4ebe5; }
+.preview summary { color: #245137; font-size: .82rem; font-weight: 750; cursor: pointer; }
+.preview ul { margin: 8px 0 0; padding-left: 20px; color: #536258; font-size: .75rem; line-height: 1.6; }
 .preview > div > span { color: #66736a; font-size: .68rem; overflow-wrap: anywhere; }
 .preview pre { max-height: 560px; overflow: auto; margin: 0; padding: 14px; border: 1px solid #dce5dd; border-radius: 4px; background: #f7f9f7; color: #26342a; font-size: .73rem; line-height: 1.55; white-space: pre-wrap; }
 .empty { padding: 12px 15px; color: #66736a; font-size: .78rem; }
 @media (max-width: 740px) { .layout { grid-template-columns: 1fr; } .header { align-items: stretch; flex-direction: column; } }
-@media (max-width: 520px) { .fields { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+@media (max-width: 760px) { .rulesForm { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .fields { grid-template-columns: 1fr; } .wide { grid-column: auto; } .rule { grid-template-columns: 1fr; gap: 5px; } }

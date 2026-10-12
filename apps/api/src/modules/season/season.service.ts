@@ -133,7 +133,17 @@ export class SeasonService {
       this.prisma.match.count({ where: { season_id: seasonId, status: { in: ['COMPLETED', 'CONFIRMED', 'ARCHIVED'] } } }),
     ]);
 
-    const readiness = await this.getTransitionReadiness(seasonId, season.status);
+    let rulesStatus: 'NOT_CONFIGURED' | 'DRAFT' | 'VALID' | 'PUBLISHED' = 'NOT_CONFIGURED';
+    if (season.ruleset?.season_id === seasonId) {
+      rulesStatus = season.ruleset.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT';
+      try {
+        validateCompetitionRules(season.ruleset.rules);
+        if (rulesStatus === 'DRAFT') rulesStatus = 'VALID';
+      } catch {
+        rulesStatus = 'DRAFT';
+      }
+    }
+    const readiness = await this.getTransitionReadiness(seasonId, season.status, season.ruleset);
 
     const nextAction = {
       DRAFT: { label: 'Open registration', endpoint: 'publish', reason: 'Complete configuration before accepting participants.' },
@@ -164,6 +174,7 @@ export class SeasonService {
         publishedAt: season.ruleset.published_at,
         rulesHash: season.ruleset.rules_hash,
       } : null,
+      rulesStatus,
       playerFacingRules: season.ruleset
         ? buildPlayerFacingRules(validateCompetitionRules(season.ruleset.rules), {
             name: season.ruleset_name ?? season.ruleset.name,
@@ -186,7 +197,7 @@ export class SeasonService {
     };
   }
 
-  private async getTransitionReadiness(seasonId: string, status: string) {
+  private async getTransitionReadiness(seasonId: string, status: string, ruleset?: { season_id: string | null; rules: unknown } | null) {
     const divisions = await this.prisma.division.findMany({
       where: { season_id: seasonId, active: true },
       select: {
@@ -204,6 +215,17 @@ export class SeasonService {
       },
     });
     const issues: string[] = [];
+    if (['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED'].includes(status)) {
+      if (!ruleset || ruleset.season_id !== seasonId) {
+        issues.push('Configure valid rules owned by this season before registration or activation.');
+      } else {
+        try {
+          validateCompetitionRules(ruleset.rules);
+        } catch (error) {
+          issues.push(`Season rules are invalid: ${error instanceof Error ? error.message : 'validation failed'}`);
+        }
+      }
+    }
     if (['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'ROSTER_LOCKED'].includes(status) && !divisions.length) {
       issues.push('At least one active participant group is required.');
     }
@@ -368,14 +390,6 @@ export class SeasonService {
       });
       if (!league) throw new NotFoundException('Active league not found');
 
-      const ruleset = dto.rulesetId
-        ? await tx.competitionRuleset.findUnique({ where: { id: dto.rulesetId } })
-        : await tx.competitionRuleset.findFirst({ where: { status: 'PUBLISHED' }, orderBy: { published_at: 'desc' } });
-      if (!ruleset || ruleset.status !== 'PUBLISHED') {
-        throw new BadRequestException('Choose a published Competition Ruleset before creating a Season.');
-      }
-      const publishedRules = validateCompetitionRules(ruleset.rules);
-
       const season = await tx.season.create({
         // A season is always created inside an active permanent league.
         data: {
@@ -385,10 +399,6 @@ export class SeasonService {
           status: 'DRAFT',
           start_date: startDate,
           end_date: endDate,
-          ruleset_id: ruleset.id,
-          ruleset_name: ruleset.name,
-          ruleset_version: ruleset.version,
-          competition_config: { rules: publishedRules, rulesHash: ruleset.rules_hash } as Prisma.InputJsonValue,
         },
       });
 
@@ -411,24 +421,6 @@ export class SeasonService {
         },
       });
 
-      await tx.auditLog.create({
-        data: {
-          entity_type: 'Season',
-          entity_id: season.id,
-          action: 'SEASON_RULESET_ATTACHED',
-          actor_id: actor?.id,
-          actor_role: actor?.role,
-          request_id: actor?.requestId,
-          after_state: {
-            rulesetId: ruleset.id,
-            rulesetName: ruleset.name,
-            rulesetVersion: ruleset.version,
-            rulesHash: ruleset.rules_hash,
-          },
-        },
-      });
-
-
       await this.outbox.enqueueEvent(tx, {
         eventName: 'season.created',
         aggregateType: 'Season',
@@ -443,28 +435,6 @@ export class SeasonService {
     });
   }
 
-  async getPlayerFacingRules(seasonId: string) {
-    const season = await this.prisma.season.findUnique({ where: { id: seasonId }, include: { ruleset: true } });
-    if (!season) throw new NotFoundException('Season not found');
-    if (!season.ruleset) {
-      return { available: false, seasonId, rulesetName: season.ruleset_name, rulesetVersion: season.ruleset_version, playerFacing: null };
-    }
-    const rules = validateCompetitionRules(season.ruleset.rules);
-    return {
-      available: true,
-      seasonId,
-      rulesetId: season.ruleset.id,
-      rulesetName: season.ruleset_name ?? season.ruleset.name,
-      rulesetVersion: season.ruleset_version ?? season.ruleset.version,
-      rulesHash: season.ruleset.rules_hash,
-      publishedAt: season.ruleset.published_at?.toISOString() ?? null,
-      playerFacing: buildPlayerFacingRules(rules, {
-        name: season.ruleset_name ?? season.ruleset.name,
-        version: season.ruleset_version ?? season.ruleset.version,
-      }),
-    };
-  }
-
   private async changeStatus(
     tx: Prisma.TransactionClient,
     seasonId: string,
@@ -472,7 +442,7 @@ export class SeasonService {
     actor?: { id?: string; role?: string; correlationId?: string },
     metadata?: unknown,
   ) {
-    const season = await tx.season.findUnique({ where: { id: seasonId } });
+    const season = await tx.season.findUnique({ where: { id: seasonId }, include: { ruleset: true } });
     if (!season) throw new NotFoundException('Season not found');
 
     const allowed = this.validTransitions[season.status] ?? [];
@@ -481,6 +451,7 @@ export class SeasonService {
     }
 
     if (newStatus === 'REGISTRATION_OPEN') {
+      this.assertSeasonRulesReady(season, seasonId);
       if (!season.start_date || !season.end_date) {
         throw new BadRequestException('Season start and end dates are required');
       }
@@ -510,6 +481,7 @@ export class SeasonService {
       if (season.status !== 'ROSTER_LOCKED') {
         throw new BadRequestException('Season roster must be locked before activation');
       }
+      this.assertSeasonRulesReady(season, seasonId);
       const readiness = await this.getCanonicalScheduleReadiness(seasonId, tx);
       if (!readiness.canAdvance) {
         throw new BadRequestException(`Canonical competition schedule is not ready for activation: ${readiness.issues.join(' ')}`);
@@ -697,6 +669,17 @@ export class SeasonService {
     }
 
     return updated;
+  }
+
+  private assertSeasonRulesReady(season: { ruleset?: { season_id?: string | null; rules: unknown } | null }, seasonId: string) {
+    if (!season.ruleset || season.ruleset.season_id !== seasonId) {
+      throw new BadRequestException('Configure and save valid rules for this season before registration or activation.');
+    }
+    try {
+      validateCompetitionRules(season.ruleset.rules);
+    } catch (error) {
+      throw new BadRequestException(`Season rules are invalid: ${error instanceof Error ? error.message : 'validation failed'}`);
+    }
   }
 
   async publishSeason(seasonId: string, actor?: { id?: string; role?: string; correlationId?: string }) {

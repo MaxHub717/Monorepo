@@ -1,41 +1,13 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import { IsObject, IsOptional, IsString, IsUUID } from 'class-validator';
-import { RequirePermission } from '../../common/authz/authz.decorators.js';
+import { Body, Controller, Get, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { IsObject } from 'class-validator';
+import { Public, RequirePermission } from '../../common/authz/authz.decorators.js';
 import { AccountStatusGuard, AuthGuard, PermissionsGuard } from '../../common/authz/authz.guards.js';
 import { PermissionName } from '../../common/authz/authz.types.js';
 import { CompetitionService } from './competition.service.js';
 
-export class CreateCompetitionRulesetDto {
-  @IsString()
-  name!: string;
-
-  @IsString()
-  version!: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
+export class SaveSeasonRulesDto {
   @IsObject()
   rules!: Record<string, unknown>;
-
-  @IsOptional()
-  @IsUUID('4')
-  supersedesRulesetId?: string;
-}
-
-export class UpdateCompetitionRulesetDto {
-  @IsOptional()
-  @IsString()
-  name?: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsObject()
-  rules?: Record<string, unknown>;
 }
 
 @Controller('competition/rulesets')
@@ -49,33 +21,38 @@ export class CompetitionRulesetController {
     return this.competitionService.getDefaultRulesetTemplate();
   }
 
+}
+
+@Controller('seasons/:seasonId/rules')
+@UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
+@RequirePermission(PermissionName.MANAGE_SEASONS)
+export class SeasonRulesController {
+  constructor(private readonly competitionService: CompetitionService) {}
+
   @Get()
-  listRulesets(@Query('publishedOnly') publishedOnly?: string) {
-    return this.competitionService.listRulesets(publishedOnly === 'true');
+  getSeasonRules(@Param('seasonId') seasonId: string) {
+    return this.competitionService.getSeasonRules(seasonId);
   }
 
-  @Post()
-  createRuleset(@Body() dto: CreateCompetitionRulesetDto, @Req() request: any) {
-    return this.competitionService.createRuleset(dto, this.actor(request));
+  @Public()
+  @Get('player-facing')
+  getPlayerFacingRules(@Param('seasonId') seasonId: string) {
+    return this.competitionService.getPlayerFacingSeasonRules(seasonId);
   }
 
-  @Get(':rulesetId/preview')
-  previewRuleset(@Param('rulesetId') rulesetId: string) {
-    return this.competitionService.previewRuleset(rulesetId);
+  @Put()
+  saveSeasonRules(@Param('seasonId') seasonId: string, @Body() dto: SaveSeasonRulesDto, @Req() request: any) {
+    return this.competitionService.saveSeasonRules(seasonId, dto.rules, this.actor(request));
   }
 
-  @Put(':rulesetId')
-  updateDraft(
-    @Param('rulesetId') rulesetId: string,
-    @Body() dto: UpdateCompetitionRulesetDto,
-    @Req() request: any,
-  ) {
-    return this.competitionService.updateDraftRuleset(rulesetId, dto, this.actor(request));
+  @Get('preview')
+  previewSeasonRules(@Param('seasonId') seasonId: string) {
+    return this.competitionService.previewSeasonRules(seasonId);
   }
 
-  @Post(':rulesetId/publish')
-  publishRuleset(@Param('rulesetId') rulesetId: string, @Req() request: any) {
-    return this.competitionService.publishRuleset(rulesetId, this.actor(request));
+  @Post('publish')
+  publishSeasonRules(@Param('seasonId') seasonId: string, @Req() request: any) {
+    return this.competitionService.publishSeasonRules(seasonId, this.actor(request));
   }
 
   private actor(request: any) {
