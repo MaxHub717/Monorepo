@@ -232,6 +232,72 @@ export async function getMyPlayerProfile(): Promise<PlayerProfileResponse> {
   );
 }
 
+export type OpenSeasonDivision = {
+  id: string;
+  name: string;
+  type: string;
+  capacity: number | null;
+  registrationCapacity: number | null;
+  registrationCount: number;
+  availableSlots: number | null;
+};
+
+export type OpenSeason = {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: 'REGISTRATION_OPEN';
+  startDate: string;
+  endDate: string;
+  registrationOpenAt: string | null;
+  registrationCloseAt: string | null;
+  timezone: string;
+  league: { id: string; name: string };
+  rules: {
+    available: boolean;
+    name: string | null;
+    version: string | null;
+    hash: string | null;
+    playerFacing: CompetitionRulesPreview['playerFacing'] | null;
+  };
+  divisions: OpenSeasonDivision[];
+};
+
+export type PlayerSeasonRegistration = {
+  id: string;
+  status: string;
+  registered_at: string;
+  withdrawn_at: string | null;
+  season: {
+    id: string;
+    name: string;
+    status: string;
+    start_date: string | null;
+    end_date: string | null;
+    league: { id: string; name: string };
+  };
+  division: { id: string; name: string; active: boolean };
+};
+
+export async function listOpenRegistrationSeasons(): Promise<OpenSeason[]> {
+  return apiFetch<OpenSeason[]>('/seasons/open-for-registration', { cache: 'no-store' });
+}
+
+export async function listMySeasonRegistrations(): Promise<PlayerSeasonRegistration[]> {
+  return apiFetch<PlayerSeasonRegistration[]>('/players/me/registrations', { cache: 'no-store' });
+}
+
+export async function registerForSeasonDivision(seasonId: string, divisionId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/seasons/${seasonId}/divisions/${divisionId}/participants`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export async function withdrawFromSeason(seasonId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/seasons/${seasonId}/participants/self`, { method: 'DELETE' });
+}
+
 export async function updateMyPlayerProfile(
   payload: PlayerProfileUpdateInput,
 ): Promise<PlayerProfileUpdateResponse> {

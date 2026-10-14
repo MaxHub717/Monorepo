@@ -370,6 +370,108 @@ describe('competition format handling', () => {
   });
 });
 
+describe('SeasonService player-facing season discovery', () => {
+  it('shows only open seasons with published rules and active divisions to players', async () => {
+    const service = new SeasonService(
+      {
+        season: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: 'open-season',
+              name: 'Open Season',
+              description: 'Visible to players',
+              status: 'REGISTRATION_OPEN',
+              start_date: new Date('2026-01-01T00:00:00Z'),
+              end_date: new Date('2026-02-15T00:00:00Z'),
+              registration_open_at: new Date('2025-12-01T00:00:00Z'),
+              registration_close_at: new Date('2026-01-20T00:00:00Z'),
+              competition_timezone: 'UTC',
+              league: { id: 'league-1', name: 'NGL League' },
+              ruleset: {
+                id: 'ruleset-1',
+                season_id: 'open-season',
+                name: 'Open Season Rules',
+                version: '1.0.0',
+                status: 'PUBLISHED',
+                rules: DEFAULT_COMPETITION_RULES,
+                rules_hash: 'hash-1',
+              },
+              divisions: [
+                {
+                  id: 'div-1',
+                  name: 'Division One',
+                  type: 'COMPETITIVE',
+                  capacity: 16,
+                  registration_capacity: 16,
+                  _count: { participants: 3 },
+                },
+              ],
+            },
+            {
+              id: 'draft-season',
+              name: 'Draft Season',
+              description: 'Hidden from players',
+              status: 'DRAFT',
+              start_date: new Date('2026-01-01T00:00:00Z'),
+              end_date: new Date('2026-02-15T00:00:00Z'),
+              registration_open_at: null,
+              registration_close_at: null,
+              competition_timezone: 'UTC',
+              league: { id: 'league-1', name: 'NGL League' },
+              ruleset: null,
+              divisions: [],
+            },
+            {
+              id: 'closed-season',
+              name: 'Closed Season',
+              description: 'Registration closed',
+              status: 'REGISTRATION_OPEN',
+              start_date: new Date('2026-01-01T00:00:00Z'),
+              end_date: new Date('2026-02-15T00:00:00Z'),
+              registration_open_at: new Date('2025-12-01T00:00:00Z'),
+              registration_close_at: new Date('2025-12-10T00:00:00Z'),
+              competition_timezone: 'UTC',
+              league: { id: 'league-1', name: 'NGL League' },
+              ruleset: null,
+              divisions: [{
+                id: 'div-2',
+                name: 'Division Two',
+                type: 'AMATEUR',
+                capacity: 8,
+                registration_capacity: 8,
+                _count: { participants: 8 },
+              }],
+            },
+          ]),
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.listOpenRegistrationSeasons();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 'open-season',
+      name: 'Open Season',
+      status: 'REGISTRATION_OPEN',
+      rules: {
+        available: true,
+        name: 'Open Season Rules',
+      },
+    });
+    expect(result[0].divisions).toEqual([
+      expect.objectContaining({
+        id: 'div-1',
+        name: 'Division One',
+        registrationCapacity: 16,
+      }),
+    ]);
+  });
+});
+
 describe('SeasonService competition-field activation readiness', () => {
   const eligibleParticipants = Array.from({ length: 64 }, (_, index) => ({
     player_id: `player-${index + 1}`,

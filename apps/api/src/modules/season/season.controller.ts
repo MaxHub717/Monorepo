@@ -14,6 +14,11 @@ export class SeasonController {
     return this.seasonService.listSeasons();
   }
 
+  @Get('open-for-registration')
+  listOpenRegistrationSeasons() {
+    return this.seasonService.listOpenRegistrationSeasons();
+  }
+
   @Get(':id/overview')
   @UseGuards(AuthGuard, AccountStatusGuard, PermissionsGuard)
   @RequirePermission(PermissionName.MANAGE_SEASONS)

@@ -1,12 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsInt, IsOptional, Min } from 'class-validator';
 import { AuthGuard, AccountStatusGuard } from '../../common/authz/authz.guards.js';
 import { ParticipationService } from './participation.service.js';
 
 export class RegisterParticipantDto {
-  @IsUUID('4')
-  playerId!: string;
-
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -30,7 +27,7 @@ export class ParticipationController {
     @Body() dto: RegisterParticipantDto,
     @Req() req: any,
   ) {
-    return this.participationService.register(seasonId, divisionId, dto, {
+    return this.participationService.registerForUser(seasonId, divisionId, req.user?.id, dto.seed, {
       id: req.user?.id,
       role: req.user?.roles?.[0],
       correlationId: req.id,
@@ -43,6 +40,15 @@ export class ParticipationController {
 export class ParticipationWithdrawalController {
   constructor(private readonly participationService: ParticipationService) {}
 
+  @Delete('self')
+  withdrawSelf(@Param('seasonId') seasonId: string, @Req() req: any) {
+    return this.participationService.withdrawForUser(seasonId, req.user?.id, {
+      id: req.user?.id,
+      role: req.user?.roles?.[0],
+      correlationId: req.id,
+    });
+  }
+
   @Delete(':playerId')
   withdraw(@Param('seasonId') seasonId: string, @Param('playerId') playerId: string, @Req() req: any) {
     return this.participationService.withdraw(seasonId, playerId, {
@@ -50,5 +56,16 @@ export class ParticipationWithdrawalController {
       role: req.user?.roles?.[0],
       correlationId: req.id,
     });
+  }
+}
+
+@Controller('players/me/registrations')
+@UseGuards(AuthGuard, AccountStatusGuard)
+export class MyParticipationController {
+  constructor(private readonly participationService: ParticipationService) {}
+
+  @Get()
+  list(@Req() req: any) {
+    return this.participationService.listForUser(req.user?.id);
   }
 }

@@ -108,6 +108,90 @@ export class SeasonService {
     });
   }
 
+  async listOpenRegistrationSeasons() {
+    const now = new Date();
+    const seasons = await this.prisma.season.findMany({
+      where: {
+        status: 'REGISTRATION_OPEN',
+        start_date: { not: null },
+        end_date: { not: null },
+        OR: [{ registration_close_at: null }, { registration_close_at: { gt: now } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        start_date: true,
+        end_date: true,
+        registration_open_at: true,
+        registration_close_at: true,
+        competition_timezone: true,
+        league: { select: { id: true, name: true } },
+        ruleset: { select: { id: true, season_id: true, name: true, version: true, status: true, rules: true, rules_hash: true } },
+        divisions: {
+          where: { active: true },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            capacity: true,
+            registration_capacity: true,
+            _count: { select: { participants: true } },
+          },
+          orderBy: { name: 'asc' },
+        },
+      },
+      orderBy: [{ registration_close_at: 'asc' }, { start_date: 'asc' }],
+    });
+
+    return seasons.flatMap((season) => {
+      const divisions = season.divisions.map((division) => ({
+        id: division.id,
+        name: division.name,
+        type: division.type,
+        capacity: division.capacity,
+        registrationCapacity: division.registration_capacity,
+        registrationCount: division._count.participants,
+        availableSlots: division.registration_capacity === null
+          ? null
+          : Math.max(division.registration_capacity - division._count.participants, 0),
+      }));
+      const availableDivisions = divisions.filter((division) =>
+        division.availableSlots === null || division.availableSlots > 0);
+      if (!season.start_date || !season.end_date || !availableDivisions.length) return [];
+
+      const publishedRules = season.ruleset?.season_id === season.id && season.ruleset.status === 'PUBLISHED'
+        ? validateCompetitionRules(season.ruleset.rules)
+        : null;
+      return [{
+        id: season.id,
+        name: season.name,
+        description: season.description,
+        status: season.status,
+        startDate: season.start_date,
+        endDate: season.end_date,
+        registrationOpenAt: season.registration_open_at,
+        registrationCloseAt: season.registration_close_at,
+        timezone: season.competition_timezone,
+        league: season.league,
+        rules: publishedRules && season.ruleset
+          ? {
+              available: true,
+              name: season.ruleset.name,
+              version: season.ruleset.version,
+              hash: season.ruleset.rules_hash,
+              playerFacing: buildPlayerFacingRules(publishedRules, {
+                name: season.ruleset.name,
+                version: season.ruleset.version,
+              }),
+            }
+          : { available: false, name: null, version: null, hash: null, playerFacing: null },
+        divisions,
+      }];
+    });
+  }
+
   async getOverview(seasonId: string) {
     const season = await this.prisma.season.findUnique({
       where: { id: seasonId },

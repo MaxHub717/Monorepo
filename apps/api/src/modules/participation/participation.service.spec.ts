@@ -90,4 +90,43 @@ describe('ParticipationService', () => {
       data: { status: 'WITHDRAWN', withdrawn_at: expect.any(Date) },
     });
   });
+
+  it('resolves the authenticated player identity for self-registration', async () => {
+    prisma.season.findUnique.mockResolvedValue({ id: 'season-id', status: 'REGISTRATION_OPEN', registration_close_at: null });
+    prisma.division.findUnique.mockResolvedValue({ id: 'division-id', season_id: 'season-id', active: true, registration_capacity: null, capacity: null });
+    prisma.playerProfile.findUnique.mockResolvedValue({
+      id: 'player-id',
+      user_id: 'user-id',
+      verification_status: 'VERIFIED',
+      player_status: 'REGISTERED',
+    });
+    prisma.divisionParticipant.findUnique.mockResolvedValue(null);
+    prisma.divisionParticipant.count.mockResolvedValue(0);
+    prisma.divisionParticipant.create.mockResolvedValue({ id: 'participant-id', player: { id: 'player-id' }, division: { id: 'division-id' } });
+    outbox.enqueueEvent.mockResolvedValue({});
+
+    const result = await service.registerForUser('season-id', 'division-id', 'user-id', undefined, { id: 'user-id', role: 'PLAYER' });
+
+    expect(prisma.playerProfile.findUnique).toHaveBeenCalledWith({
+      where: { user_id: 'user-id' },
+      select: { id: true },
+    });
+    expect(prisma.divisionParticipant.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        season_id: 'season-id',
+        division_id: 'division-id',
+        player_id: 'player-id',
+        status: 'ACTIVE',
+      }),
+    }));
+    expect(result).toEqual({ id: 'participant-id', player: { id: 'player-id' }, division: { id: 'division-id' } });
+  });
+
+  it('rejects attempts to register another player profile through the authenticated self route', async () => {
+    prisma.playerProfile.findUnique.mockResolvedValue({ id: 'player-id', user_id: 'other-user-id', verification_status: 'VERIFIED', player_status: 'REGISTERED' });
+
+    await expect(
+      service.registerForUser('season-id', 'division-id', 'user-id', undefined, { id: 'user-id', role: 'PLAYER' }),
+    ).rejects.toThrow('Players may only register themselves');
+  });
 });

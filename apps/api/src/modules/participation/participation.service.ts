@@ -22,6 +22,54 @@ export class ParticipationService {
     private readonly outbox: OutboxService,
   ) {}
 
+  async listForUser(userId: string) {
+    const player = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+    if (!player) throw new NotFoundException('Player profile not found');
+
+    return this.prisma.divisionParticipant.findMany({
+      where: { player_id: player.id },
+      select: {
+        id: true,
+        status: true,
+        registered_at: true,
+        withdrawn_at: true,
+        season: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            start_date: true,
+            end_date: true,
+            league: { select: { id: true, name: true } },
+          },
+        },
+        division: { select: { id: true, name: true, active: true } },
+      },
+      orderBy: { registered_at: 'desc' },
+    });
+  }
+
+  async registerForUser(seasonId: string, divisionId: string, userId: string, seed?: number, actor?: ParticipationActor) {
+    const player = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+    if (!player) throw new NotFoundException('Player profile not found');
+    return this.register(seasonId, divisionId, { playerId: player.id, seed }, actor);
+  }
+
+  async withdrawForUser(seasonId: string, userId: string, actor?: ParticipationActor) {
+    const player = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+    if (!player) throw new NotFoundException('Player profile not found');
+    return this.withdraw(seasonId, player.id, actor);
+  }
+
   async listParticipants(seasonId: string, divisionId: string) {
     const division = await this.prisma.division.findUnique({ where: { id: divisionId } });
     if (!division || division.season_id !== seasonId) throw new NotFoundException('Division not found for this season');
