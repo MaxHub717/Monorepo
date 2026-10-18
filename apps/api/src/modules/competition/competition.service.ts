@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DisputeStatus, Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PermissionName } from '../../common/authz/authz.types.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -88,7 +88,11 @@ function getPublicSeriesPlayerIds(series: {
     .filter((playerId): playerId is string => Boolean(playerId));
 }
 
-const activePublicResultDisputeStatuses = ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] as const;
+const activePublicResultDisputeStatuses: DisputeStatus[] = [
+  DisputeStatus.SUBMITTED,
+  DisputeStatus.UNDER_REVIEW,
+  DisputeStatus.ESCALATED,
+];
 
 const publicSeriesDetailSelect = {
   id: true,
@@ -179,11 +183,18 @@ function projectPublicSeries(
     const legacyApproved = verification === undefined
       && game.status === 'COMPLETED'
       && game.result !== null;
-    const hasPublishedResult = !seriesDisputed
-      && game.disputes.length === 0
-      && game.status === 'COMPLETED'
-      && game.result !== null
-      && (legacyApproved || ['APPROVED', 'OVERRIDDEN'].includes(verification.status));
+    const hasPublishedResult =
+  !seriesDisputed
+  && game.disputes.length === 0
+  && game.status === 'COMPLETED'
+  && game.result !== null
+  && (
+    legacyApproved
+    || (
+      verification !== undefined
+      && ['APPROVED', 'OVERRIDDEN'].includes(verification.status)
+    )
+  );
     return {
       number: game.game_number,
       status: game.status,

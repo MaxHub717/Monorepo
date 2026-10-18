@@ -847,39 +847,6 @@ export type CompetitionWorkspace = {
       isFinalPhase: boolean;
     }>;
   } | null;
-
-  export type PlayerScheduleEntry = {
-    seriesId: string;
-    seriesNumber: number | null;
-    status: string;
-    season: { id: string; name: string; leagueName: string };
-    phase: { number: number; name: string };
-    opponent: string | null;
-    scheduledAt: string | null;
-    matchWindowEndAt: string | null;
-    checkInOpensAt: string | null;
-    checkInClosesAt: string | null;
-    timezone: string;
-    checkInState: 'NOT_SCHEDULED' | 'NOT_OPEN' | 'OPEN' | 'CLOSED';
-    checkedInAt: string | null;
-    canCheckIn: boolean;
-  };
-
-  export type PlayerSchedule = {
-    serverTime: string;
-    entries: PlayerScheduleEntry[];
-  };
-
-  export async function getMyCompetitionSchedule(): Promise<PlayerSchedule> {
-    return apiFetch<PlayerSchedule>('/competition/me/schedule', { cache: 'no-store' });
-  }
-
-  export async function checkInToMySeries(seriesId: string): Promise<{ alreadyCheckedIn: boolean; checked_in_at: string }> {
-    return apiFetch<{ alreadyCheckedIn: boolean; checked_in_at: string }>(
-      `/competition/me/series/${encodeURIComponent(seriesId)}/check-in`,
-      { method: 'POST', body: JSON.stringify({}) },
-    );
-  }
   phases: Array<{
     id: string;
     number: number;
@@ -963,6 +930,39 @@ export type CompetitionWorkspace = {
     }>;
   }>;
 };
+
+export type PlayerScheduleEntry = {
+  seriesId: string;
+  seriesNumber: number | null;
+  status: string;
+  season: { id: string; name: string; leagueName: string };
+  phase: { number: number; name: string };
+  opponent: string | null;
+  scheduledAt: string | null;
+  matchWindowEndAt: string | null;
+  checkInOpensAt: string | null;
+  checkInClosesAt: string | null;
+  timezone: string;
+  checkInState: 'NOT_SCHEDULED' | 'NOT_OPEN' | 'OPEN' | 'CLOSED';
+  checkedInAt: string | null;
+  canCheckIn: boolean;
+};
+
+export type PlayerSchedule = {
+  serverTime: string;
+  entries: PlayerScheduleEntry[];
+};
+
+export async function getMyCompetitionSchedule(): Promise<PlayerSchedule> {
+  return apiFetch<PlayerSchedule>('/competition/me/schedule', { cache: 'no-store' });
+}
+
+export async function checkInToMySeries(seriesId: string): Promise<{ alreadyCheckedIn: boolean; checked_in_at: string }> {
+  return apiFetch<{ alreadyCheckedIn: boolean; checked_in_at: string }>(
+    `/competition/me/series/${encodeURIComponent(seriesId)}/check-in`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
 
 export async function getCompetitionWorkspace(seasonId: string): Promise<CompetitionWorkspace> {
   return apiFetch<CompetitionWorkspace>(`/competition/seasons/${seasonId}/workspace`, { cache: 'no-store' });

@@ -211,7 +211,19 @@ describe('ParticipationService', () => {
 
   it('rejects attempts to register another player profile through the authenticated self route', async () => {
     prisma.playerProfile.findUnique.mockResolvedValue({ id: 'player-id', user_id: 'other-user-id', verification_status: 'VERIFIED', player_status: 'REGISTERED' });
+    
+    prisma.season.findUnique.mockResolvedValue({
+  id: 'season-id',
+  status: 'REGISTRATION_OPEN',
+  registration_close_at: null,
+});
 
+prisma.division.findUnique.mockResolvedValue({
+  id: 'division-id',
+  season_id: 'season-id',
+  active: true,
+  registration_capacity: null,
+});
     await expect(
       service.registerForUser('season-id', 'division-id', 'user-id', undefined, { id: 'user-id', role: 'PLAYER' }),
     ).rejects.toThrow('Players may only register themselves');
