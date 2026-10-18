@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, UseGuards, Req, Param, Patch, Delete } from '@nestjs/common';
 import { PermissionName } from '../../common/authz/authz.types.js';
-import { RequirePermission } from '../../common/authz/authz.decorators.js';
+import { Public, RequirePermission } from '../../common/authz/authz.decorators.js';
 import { AuthGuard, AccountStatusGuard, PermissionsGuard } from '../../common/authz/authz.guards.js';
 import { SeasonService } from './season.service.js';
 import { CreateDivisionDto, CreateSeasonDto, UpdateDivisionDto } from './dto/season.dto.js';
@@ -12,6 +12,24 @@ export class SeasonController {
   @Get()
   listSeasons() {
     return this.seasonService.listSeasons();
+  }
+
+  @Public()
+  @Get('public')
+  listPublicSeasons() {
+    return this.seasonService.listPublicSeasons();
+  }
+
+  @Public()
+  @Get('public/:id')
+  getPublicSeason(@Param('id') id: string) {
+    return this.seasonService.getPublicSeason(id);
+  }
+
+  @Public()
+  @Get('public/:id/overview')
+  getPublicSeasonOverview(@Param('id') id: string) {
+    return this.seasonService.getPublicSeasonOverview(id);
   }
 
   @Get('open-for-registration')

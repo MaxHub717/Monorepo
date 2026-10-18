@@ -60,6 +60,7 @@ export type PlayerProfile = {
   no_shows: number;
   mvp_count: number;
   classification: string;
+  public_profile?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -86,6 +87,7 @@ export type CreateClubResponse = {
 export type PlayerProfileUpdateInput = {
   gamerTag?: string;
   region?: string;
+  publicProfile?: boolean;
   metadata?: Record<string, unknown>;
 };
 
@@ -263,6 +265,169 @@ export type OpenSeason = {
   divisions: OpenSeasonDivision[];
 };
 
+export type PublicSeason = {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  registrationOpenAt: string | null;
+  registrationCloseAt: string | null;
+  timezone: string;
+  league: { id: string; name: string };
+  divisions: Array<{ id: string; name: string; type: string }>;
+};
+
+export type PublicSeasonOverview = Omit<PublicSeason, 'divisions'> & {
+  divisions: Array<{ id: string; name: string; type: string; participantCount: number }>;
+  participantCount: number;
+  phases: Array<{
+    number: number;
+    type: string;
+    name: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    seriesCount: number;
+    scheduledSeriesCount: number;
+  }>;
+  scheduledSeriesCount: number;
+  publishedResultsCount: number;
+  publishedRules: {
+    name: string;
+    version: string;
+    sections: Array<{ title: string; items: string[] }>;
+    text: string;
+  } | null;
+  rulesPublishedAt: string | null;
+};
+
+export type PublicSeasonSchedule = {
+  season: { id: string; name: string; status: string; timezone: string };
+  phases: Array<{
+    number: number;
+    type: string;
+    name: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    series: Array<{
+      id: string;
+      number: number | null;
+      status: string;
+      scheduledAt: string | null;
+      participants: string[];
+    }>;
+  }>;
+};
+
+export type PublicSeriesDetail = {
+  id: string;
+  number: number | null;
+  status: string;
+  scheduledAt: string | null;
+  timezone: string;
+  season: {
+    id: string;
+    name: string;
+    status: string;
+    league: { id: string; name: string };
+  };
+  phase: {
+    number: number;
+    type: string;
+    name: string;
+    status: string;
+  };
+  participants: string[];
+  games: Array<{
+    number: number;
+    status: string;
+    homeParticipant: string | null;
+    awayParticipant: string | null;
+    resultStatus: 'PENDING' | 'NOT_PUBLISHED' | 'PUBLISHED';
+    result: {
+      outcome: string;
+      homeScore: number;
+      awayScore: number;
+      winner: string | null;
+      completedAt: string | null;
+    } | null;
+  }>;
+  finalResult: {
+    status: string;
+    outcome: string;
+    advancingParticipant: string | null;
+  } | null;
+};
+
+export type PublicSeasonResults = {
+  season: {
+    id: string;
+    name: string;
+    status: string;
+    timezone: string;
+    league: { id: string; name: string };
+  };
+  results: PublicSeriesDetail[];
+};
+
+export type PublicPlayerSummary = {
+  id: string;
+  gamerTag: string;
+  region: string | null;
+};
+
+export type PublicPlayerCareerEntry = {
+  seriesId: string;
+  seriesNumber: number | null;
+  season: PublicSeriesDetail['season'];
+  phase: PublicSeriesDetail['phase'];
+  participants: string[];
+  games: PublicSeriesDetail['games'];
+  finalResult: PublicSeriesDetail['finalResult'];
+};
+
+export type PublicPlayerProfile = {
+  player: PublicPlayerSummary;
+  career: PublicPlayerCareerEntry[];
+};
+
+export type PersonalPlayerCareer = {
+  player: { id: string; gamerTag: string };
+  career: PublicPlayerCareerEntry[];
+};
+
+export type PersonalNotification = {
+  id: string;
+  title: string;
+  message: string;
+  category: string | null;
+  event_type: string | null;
+  priority: string;
+  related_entity: string | null;
+  read: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PublicLeague = {
+  id: string;
+  name: string;
+  description: string | null;
+  region: string | null;
+  seasons: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    status: string;
+    startDate: string | null;
+    endDate: string | null;
+    timezone: string;
+  }>;
+};
+
 export type PlayerSeasonRegistration = {
   id: string;
   status: string;
@@ -279,16 +444,75 @@ export type PlayerSeasonRegistration = {
   division: { id: string; name: string; active: boolean };
 };
 
+export type SeasonRegistrationResponse = {
+  id: string;
+  status: string;
+  season_id: string;
+  division_id: string;
+};
+
 export async function listOpenRegistrationSeasons(): Promise<OpenSeason[]> {
   return apiFetch<OpenSeason[]>('/seasons/open-for-registration', { cache: 'no-store' });
+}
+
+export async function listPublicSeasons(): Promise<PublicSeason[]> {
+  return apiFetch<PublicSeason[]>('/seasons/public', { cache: 'no-store' });
+}
+
+export async function getPublicSeason(seasonId: string): Promise<PublicSeason> {
+  return apiFetch<PublicSeason>(`/seasons/public/${encodeURIComponent(seasonId)}`, { cache: 'no-store' });
+}
+
+export async function getPublicSeasonOverview(seasonId: string): Promise<PublicSeasonOverview> {
+  return apiFetch<PublicSeasonOverview>(`/seasons/public/${encodeURIComponent(seasonId)}/overview`, { cache: 'no-store' });
+}
+
+export async function getPublicSeasonSchedule(seasonId: string): Promise<PublicSeasonSchedule> {
+  return apiFetch<PublicSeasonSchedule>(`/competition/public/seasons/${encodeURIComponent(seasonId)}/schedule`, { cache: 'no-store' });
+}
+
+export async function getPublicSeriesDetail(seriesId: string): Promise<PublicSeriesDetail> {
+  return apiFetch<PublicSeriesDetail>(`/competition/public/series/${encodeURIComponent(seriesId)}`, { cache: 'no-store' });
+}
+
+export async function getPublicSeasonResults(seasonId: string): Promise<PublicSeasonResults> {
+  return apiFetch<PublicSeasonResults>(`/competition/public/seasons/${encodeURIComponent(seasonId)}/results`, { cache: 'no-store' });
+}
+
+export async function listPublicPlayers(): Promise<PublicPlayerSummary[]> {
+  return apiFetch<PublicPlayerSummary[]>('/players/public', { cache: 'no-store' });
+}
+
+export async function getPublicPlayerProfile(playerId: string): Promise<PublicPlayerProfile> {
+  return apiFetch<PublicPlayerProfile>(`/players/public/${encodeURIComponent(playerId)}`, { cache: 'no-store' });
+}
+
+export async function getMyCareer(): Promise<PersonalPlayerCareer> {
+  return apiFetch<PersonalPlayerCareer>('/players/me/career', { cache: 'no-store' });
+}
+
+export async function listPublicLeagues(): Promise<PublicLeague[]> {
+  return apiFetch<PublicLeague[]>('/leagues/public', { cache: 'no-store' });
+}
+
+export async function getPublicLeague(leagueId: string): Promise<PublicLeague> {
+  return apiFetch<PublicLeague>(`/leagues/public/${encodeURIComponent(leagueId)}`, { cache: 'no-store' });
 }
 
 export async function listMySeasonRegistrations(): Promise<PlayerSeasonRegistration[]> {
   return apiFetch<PlayerSeasonRegistration[]>('/players/me/registrations', { cache: 'no-store' });
 }
 
-export async function registerForSeasonDivision(seasonId: string, divisionId: string): Promise<unknown> {
-  return apiFetch<unknown>(`/seasons/${seasonId}/divisions/${divisionId}/participants`, {
+export async function getMyNotifications(): Promise<PersonalNotification[]> {
+  return apiFetch<PersonalNotification[]>('/notifications', { cache: 'no-store' });
+}
+
+export async function markMyNotificationsRead(): Promise<{ updated: number }> {
+  return apiFetch<{ updated: number }>('/notifications/read-all', { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function registerForSeasonDivision(seasonId: string, divisionId: string): Promise<SeasonRegistrationResponse> {
+  return apiFetch<SeasonRegistrationResponse>(`/seasons/${seasonId}/divisions/${divisionId}/participants`, {
     method: 'POST',
     body: JSON.stringify({}),
   });
@@ -623,6 +847,39 @@ export type CompetitionWorkspace = {
       isFinalPhase: boolean;
     }>;
   } | null;
+
+  export type PlayerScheduleEntry = {
+    seriesId: string;
+    seriesNumber: number | null;
+    status: string;
+    season: { id: string; name: string; leagueName: string };
+    phase: { number: number; name: string };
+    opponent: string | null;
+    scheduledAt: string | null;
+    matchWindowEndAt: string | null;
+    checkInOpensAt: string | null;
+    checkInClosesAt: string | null;
+    timezone: string;
+    checkInState: 'NOT_SCHEDULED' | 'NOT_OPEN' | 'OPEN' | 'CLOSED';
+    checkedInAt: string | null;
+    canCheckIn: boolean;
+  };
+
+  export type PlayerSchedule = {
+    serverTime: string;
+    entries: PlayerScheduleEntry[];
+  };
+
+  export async function getMyCompetitionSchedule(): Promise<PlayerSchedule> {
+    return apiFetch<PlayerSchedule>('/competition/me/schedule', { cache: 'no-store' });
+  }
+
+  export async function checkInToMySeries(seriesId: string): Promise<{ alreadyCheckedIn: boolean; checked_in_at: string }> {
+    return apiFetch<{ alreadyCheckedIn: boolean; checked_in_at: string }>(
+      `/competition/me/series/${encodeURIComponent(seriesId)}/check-in`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  }
   phases: Array<{
     id: string;
     number: number;

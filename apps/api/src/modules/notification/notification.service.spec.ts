@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCompetitionNotifications } from './notification.service.js';
+import { createCompetitionNotifications, NotificationService } from './notification.service.js';
 
 function createTransaction(preference: boolean) {
   const tx = {
@@ -62,5 +62,43 @@ describe('competition notifications', () => {
         entity_id: 'resolved:series-1:user-1',
       }),
     }));
+  });
+});
+
+describe('personal notification access', () => {
+  it('lists only the authenticated user notifications and marks only their unread items read', async () => {
+    const notifications = [{
+      id: 'notification-1',
+      user_id: 'user-1',
+      title: 'Series scheduled',
+      event_type: 'SERIES_SCHEDULED',
+      read: false,
+    }];
+    const prisma = {
+      notification: {
+        findMany: vi.fn().mockResolvedValue(notifications),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new NotificationService(prisma as any);
+
+    await expect(service.listNotifications('user-1')).resolves.toEqual(notifications);
+    expect(prisma.notification.findMany).toHaveBeenCalledWith({
+      where: { user_id: 'user-1' },
+      orderBy: { created_at: 'desc' },
+    });
+
+    await expect(service.markAllRead('user-1')).resolves.toEqual({ updated: 1 });
+    expect(prisma.notification.updateMany).toHaveBeenCalledWith({
+      where: { user_id: 'user-1', read: false },
+      data: { read: true },
+    });
+  });
+
+  it('does not list notifications when no authenticated user ID is available', async () => {
+    const findMany = vi.fn();
+    const service = new NotificationService({ notification: { findMany } } as any);
+    await expect(service.listNotifications()).resolves.toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
-import { CurrentUser, RequireRole } from '../../common/authz/authz.decorators.js';
-import { AuthGuard, AccountStatusGuard, OwnershipGuard, RolesGuard } from '../../common/authz/authz.guards.js';
+import { CurrentUser, Public, RequireRole } from '../../common/authz/authz.decorators.js';
+import { AuthGuard, AccountStatusGuard, RolesGuard } from '../../common/authz/authz.guards.js';
 import { RoleName } from '../../common/authz/authz.types.js';
 import { PlayerService } from './player.service.js';
 import { UpdatePlayerProfileDto } from './dto/player-profile.dto.js';
@@ -9,6 +9,18 @@ import { UpdatePlayerProfileDto } from './dto/player-profile.dto.js';
 @UseGuards(AuthGuard, AccountStatusGuard)
 export class PlayerController {
   constructor(private readonly playerService: PlayerService) {}
+
+  @Public()
+  @Get('public')
+  listPublicPlayers() {
+    return this.playerService.listPublicPlayers();
+  }
+
+  @Public()
+  @Get('public/:id')
+  getPublicProfile(@Param('id') id: string) {
+    return this.playerService.getPublicProfile(id);
+  }
 
   @Get('recruitment-pool')
   @UseGuards(RolesGuard)
@@ -33,8 +45,13 @@ export class PlayerController {
     return this.playerService.updateProfile(userId, dto, userId, actorRole);
   }
 
+  @Get('me/career')
+  getMyCareer(@CurrentUser('id') userId: string) {
+    return this.playerService.getMyCareer(userId);
+  }
+
   @Get(':id/career')
-  getCareer(@Param('id') id: string) {
-    return this.playerService.getCareer(id);
+  getCareer(@Param('id') id: string, @CurrentUser('id') requesterId: string, @CurrentUser('roles') requesterRoles: string[]) {
+    return this.playerService.getCareer(id, requesterId, requesterRoles);
   }
 }

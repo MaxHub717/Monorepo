@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class UpdatePlayerProfileDto {
   @IsOptional()
@@ -12,4 +12,8 @@ export class UpdatePlayerProfileDto {
 
   @IsOptional()
   metadata?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsBoolean()
+  publicProfile?: boolean;
 }

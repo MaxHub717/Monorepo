@@ -5,9 +5,10 @@ import { PrismaModule } from '../prisma/prisma.module.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { EventModule } from '../events/event.module.js';
 import { AuthzModule } from '../../common/authz/authz.module.js';
+import { CompetitionModule } from '../competition/competition.module.js';
 
 @Module({
-  imports: [PrismaModule, AuditModule, EventModule, AuthzModule],
+  imports: [PrismaModule, AuditModule, EventModule, AuthzModule, CompetitionModule],
   controllers: [PlayerController],
   providers: [PlayerService],
 })

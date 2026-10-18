@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { getCurrentUser, login } from '../auth-client';
+import { getSafeReturnTo } from '../return-to';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,16 +18,14 @@ export default function LoginPage() {
     try {
       await login(email, password);
 
-const user = await getCurrentUser();
+      const user = await getCurrentUser();
+      const canOpenAdmin = user.permissions.includes('VIEW_ADMIN_DASHBOARD');
+      const destination = getSafeReturnTo(window.location.search, canOpenAdmin)
+        ?? (canOpenAdmin ? '/admin/dashboard' : '/player/dashboard');
+      window.location.assign(destination);
+    }
 
-if (user.roles?.includes('HQ_ADMIN')) {
-  window.location.href = '/admin/dashboard';
-} else {
-  window.location.href = '/player/dashboard';
-} 
-}
-
-catch (err: any) {
+    catch (err: any) {
       setError(err?.message ?? 'Login failed');
     } finally {
       setLoading(false);

@@ -77,6 +77,172 @@ function jsonStringArray(value: Prisma.JsonValue | null | undefined): string[] {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function getPublicSeriesPlayerIds(series: {
+  participant_player_ids: Prisma.JsonValue;
+  games: Array<{ game_number: number; home_player_id: string | null; away_player_id: string | null }>;
+}): string[] {
+  const savedPlayerIds = jsonStringArray(series.participant_player_ids);
+  if (savedPlayerIds.length === 2) return savedPlayerIds;
+  const firstGame = [...series.games].sort((left, right) => left.game_number - right.game_number)[0];
+  return [firstGame?.home_player_id, firstGame?.away_player_id]
+    .filter((playerId): playerId is string => Boolean(playerId));
+}
+
+const activePublicResultDisputeStatuses = ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] as const;
+
+const publicSeriesDetailSelect = {
+  id: true,
+  series_number: true,
+  status: true,
+  participant_player_ids: true,
+  match_window_start: true,
+  resolution_state: true,
+  winner_player_id: true,
+  elimination_outcome: true,
+  season: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      competition_timezone: true,
+      league: { select: { id: true, name: true } },
+    },
+  },
+  phase: {
+    select: {
+      phase_number: true,
+      phase_type: true,
+      name: true,
+      status: true,
+    },
+  },
+  games: {
+    orderBy: { game_number: 'asc' as const },
+    select: {
+      id: true,
+      game_number: true,
+      home_player_id: true,
+      away_player_id: true,
+      winner_player_id: true,
+      home_score: true,
+      away_score: true,
+      result: true,
+      result_version: true,
+      status: true,
+      completed_at: true,
+      disputes: {
+        where: { status: { in: activePublicResultDisputeStatuses } },
+        select: { id: true },
+      },
+      result_verifications: {
+        orderBy: [{ created_at: 'desc' as const }, { id: 'desc' as const }],
+        select: { result_version: true, status: true },
+      },
+    },
+  },
+  disputes: {
+    where: { status: { in: activePublicResultDisputeStatuses } },
+    select: { id: true },
+  },
+  resolution_audits: {
+    select: { outcome: true, advancing_player_id: true },
+  },
+} satisfies Prisma.SeriesSelect;
+
+function publicSeriesWhere(seriesId?: string) {
+  return {
+    id: seriesId,
+    status: { not: 'DRAFT' },
+    phase: { is: { status: { not: 'DRAFT' } } },
+    plot: { is: { status: { not: 'ARCHIVED' } } },
+    season: {
+      is: {
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+    },
+  } satisfies Prisma.SeriesWhereInput;
+}
+
+function projectPublicSeries(
+  series: Prisma.SeriesGetPayload<{ select: typeof publicSeriesDetailSelect }>,
+  gamerTags: Map<string, string>,
+) {
+  const participantIds = getPublicSeriesPlayerIds(series);
+  const participants = participantIds
+    .map((playerId) => gamerTags.get(playerId))
+    .filter((gamerTag): gamerTag is string => Boolean(gamerTag));
+  const seriesDisputed = series.status === 'DISPUTED' || series.disputes.length > 0;
+  const games = series.games.map((game) => {
+    const verification = game.result_verifications.find((entry) => entry.result_version === game.result_version);
+    const legacyApproved = verification === undefined
+      && game.status === 'COMPLETED'
+      && game.result !== null;
+    const hasPublishedResult = !seriesDisputed
+      && game.disputes.length === 0
+      && game.status === 'COMPLETED'
+      && game.result !== null
+      && (legacyApproved || ['APPROVED', 'OVERRIDDEN'].includes(verification.status));
+    return {
+      number: game.game_number,
+      status: game.status,
+      homeParticipant: game.home_player_id ? gamerTags.get(game.home_player_id) ?? null : null,
+      awayParticipant: game.away_player_id ? gamerTags.get(game.away_player_id) ?? null : null,
+      resultStatus: hasPublishedResult
+        ? 'PUBLISHED'
+        : game.status === 'COMPLETED' && game.result !== null
+          ? 'NOT_PUBLISHED'
+          : 'PENDING',
+      result: hasPublishedResult ? {
+        outcome: game.result,
+        homeScore: game.home_score,
+        awayScore: game.away_score,
+        winner: game.winner_player_id ? gamerTags.get(game.winner_player_id) ?? null : null,
+        completedAt: game.completed_at,
+      } : null,
+    };
+  });
+  const resolutionAudit = series.resolution_audits[0];
+  const finalResult = !seriesDisputed
+    && ['COMPLETED', 'ELIMINATED'].includes(series.status)
+    && series.resolution_state !== 'UNRESOLVED'
+    && resolutionAudit
+    && games.length === 3
+    && games.every((game) => game.result !== null)
+    ? {
+        status: series.status,
+        outcome: resolutionAudit.outcome,
+        advancingParticipant: resolutionAudit.advancing_player_id
+          ? gamerTags.get(resolutionAudit.advancing_player_id) ?? null
+          : null,
+      }
+    : null;
+
+  return {
+    id: series.id,
+    number: series.series_number,
+    status: series.status,
+    scheduledAt: series.match_window_start,
+    timezone: series.season.competition_timezone,
+    season: {
+      id: series.season.id,
+      name: series.season.name,
+      status: series.season.status,
+      league: series.season.league,
+    },
+    phase: {
+      number: series.phase.phase_number,
+      type: series.phase.phase_type,
+      name: series.phase.name ?? `Phase ${series.phase.phase_number}`,
+      status: series.phase.status,
+    },
+    participants,
+    games,
+    finalResult,
+  };
+}
+
 function getParticipants(series: {
   participant_player_ids: Prisma.JsonValue;
   games: Array<{ game_number: number; home_player_id: string | null; away_player_id: string | null }>;
@@ -184,6 +350,222 @@ function getValidationInput(season: CompetitionSeason): SeriesScheduleValidation
 @Injectable()
 export class CompetitionService {
   constructor(private readonly prisma: PrismaService, private readonly auditService: AuditService) {}
+
+  async getPublicSeasonSchedule(seasonId: string) {
+    const season = await this.prisma.season.findFirst({
+      where: {
+        id: seasonId,
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        competition_timezone: true,
+        phases: {
+          where: { status: { not: 'DRAFT' } },
+          orderBy: { phase_number: 'asc' },
+          select: {
+            phase_number: true,
+            phase_type: true,
+            name: true,
+            status: true,
+            start_at: true,
+            end_at: true,
+            plots: {
+              where: { status: { not: 'ARCHIVED' } },
+              orderBy: { created_at: 'asc' },
+              select: {
+                series: {
+                  where: { status: { not: 'DRAFT' } },
+                  orderBy: { series_number: 'asc' },
+                  select: {
+                    id: true,
+                    series_number: true,
+                    status: true,
+                    participant_player_ids: true,
+                    match_window_start: true,
+                    games: {
+                      select: {
+                        game_number: true,
+                        home_player_id: true,
+                        away_player_id: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!season) throw new NotFoundException('Public season not found');
+
+    const series = season.phases.flatMap((phase) => phase.plots.flatMap((plot) => plot.series));
+    const playerIds = Array.from(new Set(series.flatMap(getPublicSeriesPlayerIds)));
+    const profiles = playerIds.length
+      ? await this.prisma.playerProfile.findMany({
+          where: { id: { in: playerIds }, deleted_at: null },
+          select: { id: true, gamer_tag: true },
+        })
+      : [];
+    const gamerTags = new Map(profiles.map((profile) => [profile.id, profile.gamer_tag]));
+
+    return {
+      season: {
+        id: season.id,
+        name: season.name,
+        status: season.status,
+        timezone: season.competition_timezone,
+      },
+      phases: season.phases.map((phase) => ({
+        number: phase.phase_number,
+        type: phase.phase_type,
+        name: phase.name ?? `Phase ${phase.phase_number}`,
+        status: phase.status,
+        startAt: phase.start_at,
+        endAt: phase.end_at,
+        series: phase.plots.flatMap((plot) => plot.series).map((item) => ({
+          id: item.id,
+          number: item.series_number,
+          status: item.status,
+          scheduledAt: item.match_window_start,
+          participants: getPublicSeriesPlayerIds(item)
+            .map((playerId) => gamerTags.get(playerId))
+            .filter((gamerTag): gamerTag is string => Boolean(gamerTag)),
+        })),
+      })),
+    };
+  }
+
+  async getPublicSeriesDetail(seriesId: string) {
+    const series = await this.prisma.series.findFirst({
+      where: publicSeriesWhere(seriesId),
+      select: publicSeriesDetailSelect,
+    });
+    if (!series) throw new NotFoundException('Public series not found');
+
+    const playerIds = Array.from(new Set([
+      ...getPublicSeriesPlayerIds(series),
+      ...series.games.flatMap((game) => [game.home_player_id, game.away_player_id, game.winner_player_id]
+        .filter((playerId): playerId is string => Boolean(playerId))),
+      ...series.resolution_audits.map((audit) => audit.advancing_player_id).filter((playerId): playerId is string => Boolean(playerId)),
+    ]));
+    const profiles = playerIds.length
+      ? await this.prisma.playerProfile.findMany({
+          where: { id: { in: playerIds }, deleted_at: null },
+          select: { id: true, gamer_tag: true },
+        })
+      : [];
+    const gamerTags = new Map(profiles.map((profile) => [profile.id, profile.gamer_tag]));
+    return projectPublicSeries(series, gamerTags);
+  }
+
+  async getPublicSeasonResults(seasonId: string) {
+    const season = await this.prisma.season.findFirst({
+      where: {
+        id: seasonId,
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        competition_timezone: true,
+        league: { select: { id: true, name: true } },
+      },
+    });
+    if (!season) throw new NotFoundException('Public season not found');
+
+    const series = await this.prisma.series.findMany({
+      where: {
+        ...publicSeriesWhere(),
+        season_id: season.id,
+      },
+      select: publicSeriesDetailSelect,
+      orderBy: [{ phase: { phase_number: 'asc' } }, { series_number: 'asc' }],
+    });
+    const playerIds = Array.from(new Set(series.flatMap((item) => [
+      ...getPublicSeriesPlayerIds(item),
+      ...item.games.flatMap((game) => [game.home_player_id, game.away_player_id, game.winner_player_id]
+        .filter((playerId): playerId is string => Boolean(playerId))),
+      ...item.resolution_audits.map((audit) => audit.advancing_player_id)
+        .filter((playerId): playerId is string => Boolean(playerId)),
+    ])));
+    const profiles = playerIds.length
+      ? await this.prisma.playerProfile.findMany({
+          where: { id: { in: playerIds }, deleted_at: null },
+          select: { id: true, gamer_tag: true },
+        })
+      : [];
+    const gamerTags = new Map(profiles.map((profile) => [profile.id, profile.gamer_tag]));
+    const results = series
+      .map((item) => projectPublicSeries(item, gamerTags))
+      .filter((item) => item.games.some((game) => game.result !== null) || item.finalResult !== null);
+
+    return {
+      season: {
+        id: season.id,
+        name: season.name,
+        status: season.status,
+        timezone: season.competition_timezone,
+        league: season.league,
+      },
+      results,
+    };
+  }
+
+  async getPublicPlayerCareer(playerId: string, gamerTag: string) {
+    const series = await this.prisma.series.findMany({
+      where: {
+        ...publicSeriesWhere(),
+        OR: [
+          { participant_player_ids: { array_contains: [playerId] } },
+          { games: { some: { OR: [{ home_player_id: playerId }, { away_player_id: playerId }] } } },
+        ],
+      },
+      select: publicSeriesDetailSelect,
+      orderBy: [
+        { season: { start_date: 'desc' } },
+        { phase: { phase_number: 'desc' } },
+        { series_number: 'desc' },
+      ],
+    });
+    const playerIds = Array.from(new Set(series.flatMap((item) => [
+      ...getPublicSeriesPlayerIds(item),
+      ...item.games.flatMap((game) => [game.home_player_id, game.away_player_id, game.winner_player_id]
+        .filter((participantId): participantId is string => Boolean(participantId))),
+      ...item.resolution_audits.map((audit) => audit.advancing_player_id)
+        .filter((participantId): participantId is string => Boolean(participantId)),
+    ])));
+    const profiles = playerIds.length
+      ? await this.prisma.playerProfile.findMany({
+          where: { id: { in: playerIds }, deleted_at: null },
+          select: { id: true, gamer_tag: true },
+        })
+      : [];
+    const gamerTags = new Map(profiles.map((profile) => [profile.id, profile.gamer_tag]));
+    gamerTags.set(playerId, gamerTag);
+
+    return series
+      .map((item) => projectPublicSeries(item, gamerTags))
+      .filter((item) => item.participants.includes(gamerTag)
+        && (item.games.some((game) => game.result !== null) || item.finalResult !== null))
+      .map((item) => ({
+        seriesId: item.id,
+        seriesNumber: item.number,
+        season: item.season,
+        phase: item.phase,
+        participants: item.participants,
+        games: item.games.filter((game) => game.result !== null),
+        finalResult: item.finalResult,
+      }));
+  }
 
   getDefaultRulesetTemplate() {
     return validateCompetitionRules(DEFAULT_COMPETITION_RULES);
@@ -341,11 +723,12 @@ export class CompetitionService {
 
   async getPlayerFacingSeasonRules(seasonId: string) {
     const result = await this.getSeasonRules(seasonId);
+    const isPublished = result.available && result.status === 'PUBLISHED' && result.playerFacing !== null;
     return {
-      available: result.available,
+      available: isPublished,
       seasonId,
       status: result.status,
-      playerFacing: result.playerFacing ?? null,
+      playerFacing: isPublished ? result.playerFacing : null,
     };
   }
 
@@ -578,6 +961,127 @@ export class CompetitionService {
         };
       }),
     };
+  }
+
+  async getPlayerSchedule(userId: string) {
+    const profile = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+    if (!profile) throw new NotFoundException('Player profile not found');
+
+    const serverTime = new Date();
+    const series = await this.prisma.series.findMany({
+      where: {
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+        match_window_start: { not: null },
+        phase: { is: { schedule_locked: true } },
+        season: { is: { deleted_at: null } },
+        OR: [
+          { participant_player_ids: { array_contains: [profile.id] } },
+          { games: { some: { OR: [{ home_player_id: profile.id }, { away_player_id: profile.id }] } } },
+        ],
+      },
+      orderBy: [{ match_window_start: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        series_number: true,
+        status: true,
+        participant_player_ids: true,
+        check_in_opens_at: true,
+        check_in_closes_at: true,
+        match_window_start: true,
+        match_window_end: true,
+        match_window_timezone: true,
+        results_deadline_at: true,
+        phase_id: true,
+        phase: { select: { phase_number: true, name: true, schedule_locked: true } },
+        season: {
+          select: {
+            id: true,
+            name: true,
+            competition_timezone: true,
+            league: { select: { name: true } },
+          },
+        },
+        games: {
+          orderBy: { game_number: 'asc' },
+          select: { game_number: true, home_player_id: true, away_player_id: true },
+        },
+        check_ins: {
+          where: { player_id: profile.id },
+          select: { checked_in_at: true },
+        },
+      },
+    });
+
+    const participantIds = Array.from(new Set(series.flatMap(getParticipants)));
+    const profiles = participantIds.length > 0
+      ? await this.prisma.playerProfile.findMany({
+          where: { id: { in: participantIds }, deleted_at: null },
+          select: { id: true, gamer_tag: true },
+        })
+      : [];
+    const gamerTags = new Map(profiles.map((player) => [player.id, player.gamer_tag]));
+
+    return {
+      serverTime: serverTime.toISOString(),
+      entries: series.flatMap((item) => {
+        const playerIds = getParticipants(item);
+        if (!playerIds.includes(profile.id)) return [];
+        const checkedInAt = item.check_ins[0]?.checked_in_at ?? null;
+        let checkInState: 'NOT_SCHEDULED' | 'NOT_OPEN' | 'OPEN' | 'CLOSED' = 'NOT_SCHEDULED';
+        if (item.check_in_opens_at && item.check_in_closes_at && item.match_window_start
+          && item.match_window_end && item.results_deadline_at) {
+          try {
+            checkInState = deriveSeriesOperationalState({
+              seriesId: item.id,
+              phaseId: item.phase_id,
+              playerIds,
+              checkInOpensAt: item.check_in_opens_at,
+              checkInClosesAt: item.check_in_closes_at,
+              matchWindowStartAt: item.match_window_start,
+              matchWindowEndAt: item.match_window_end,
+              resultsDeadlineAt: item.results_deadline_at,
+              timezone: item.match_window_timezone ?? item.season.competition_timezone,
+              gameNumbers: [1, 2, 3],
+            }, serverTime).checkIn;
+          } catch {
+            checkInState = 'NOT_SCHEDULED';
+          }
+        }
+        const opponentId = playerIds.find((playerId) => playerId !== profile.id);
+        return [{
+          seriesId: item.id,
+          seriesNumber: item.series_number,
+          status: item.status,
+          season: { id: item.season.id, name: item.season.name, leagueName: item.season.league.name },
+          phase: { number: item.phase.phase_number, name: item.phase.name ?? `Phase ${item.phase.phase_number}` },
+          opponent: opponentId ? gamerTags.get(opponentId) ?? null : null,
+          scheduledAt: item.match_window_start?.toISOString() ?? null,
+          matchWindowEndAt: item.match_window_end?.toISOString() ?? null,
+          checkInOpensAt: item.check_in_opens_at?.toISOString() ?? null,
+          checkInClosesAt: item.check_in_closes_at?.toISOString() ?? null,
+          timezone: item.season.competition_timezone,
+          checkInState,
+          checkedInAt: checkedInAt?.toISOString() ?? null,
+          canCheckIn: item.status === 'SCHEDULED'
+            && item.phase.schedule_locked
+            && checkInState === 'OPEN'
+            && checkedInAt === null,
+        }];
+      }),
+    };
+  }
+
+  async recordPlayerSeriesCheckIn(seriesId: string, userId: string, actor: AuditActor) {
+    if (actor.id !== userId) throw new ForbiddenException('A player may only check in their own account.');
+    const profile = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+    if (!profile) throw new NotFoundException('Player profile not found');
+    return this.recordSeriesCheckIn(seriesId, profile.id, {}, actor);
   }
 
   async getSeriesExecutionWorkspace(seriesId: string, canOverrideCompetitionResults = false) {

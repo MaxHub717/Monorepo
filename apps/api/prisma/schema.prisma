@@ -341,6 +341,7 @@ model PlayerProfile {
   user_id            String          @unique @db.Uuid
   gamer_tag          String          @unique
   region             String?
+  public_profile     Boolean         @default(false)
   verification_status VerificationStatus @default(UNVERIFIED)
   player_status      PlayerStatus    @default(REGISTERED)
   reputation_score   Int             @default(100)

@@ -4,8 +4,8 @@ import NavBar from './components/nav-bar';
 import styles from './components/layout.module.css';
 
 export const metadata: Metadata = {
-  title: 'NexGen Esport',
-  description: 'League platform foundation',
+  title: 'NexGen League',
+  description: 'Discover esports leagues and seasons, follow competition activity, and build your league identity.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

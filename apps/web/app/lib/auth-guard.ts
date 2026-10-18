@@ -4,6 +4,8 @@ import { apiServerFetch } from './api-server-client';
 export type AuthenticatedUser = {
   id: string;
   email: string;
+  account_status: string;
+  email_verified_at: string | null;
   roles?: string[];
   permissions?: string[];
 };

@@ -32,6 +32,52 @@ function asPlayerIds(value: Prisma.JsonValue | null | undefined): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+const publicSeasonSelect = {
+  id: true,
+  name: true,
+  description: true,
+  status: true,
+  start_date: true,
+  end_date: true,
+  registration_open_at: true,
+  registration_close_at: true,
+  competition_timezone: true,
+  league: { select: { id: true, name: true } },
+  divisions: {
+    where: { active: true },
+    select: { id: true, name: true, type: true },
+    orderBy: { name: 'asc' as const },
+  },
+} satisfies Prisma.SeasonSelect;
+
+function toPublicSeason(season: {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  start_date: Date | null;
+  end_date: Date | null;
+  registration_open_at: Date | null;
+  registration_close_at: Date | null;
+  competition_timezone: string;
+  league: { id: string; name: string };
+  divisions: Array<{ id: string; name: string; type: string }>;
+}) {
+  return {
+    id: season.id,
+    name: season.name,
+    description: season.description,
+    status: season.status,
+    startDate: season.start_date,
+    endDate: season.end_date,
+    registrationOpenAt: season.registration_open_at,
+    registrationCloseAt: season.registration_close_at,
+    timezone: season.competition_timezone,
+    league: season.league,
+    divisions: season.divisions,
+  };
+}
+
 function buildCanonicalScheduleValidationInput(season: any, phases: any[]): SeriesScheduleValidationInput {
   const rows = phases.flatMap((phase) => phase.plots.flatMap((plot: any) => plot.series.map((series: any) => {
     const savedPlayers = asPlayerIds(series.participant_player_ids);
@@ -108,6 +154,174 @@ export class SeasonService {
     });
   }
 
+  async listPublicSeasons() {
+    const seasons = await this.prisma.season.findMany({
+      where: {
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: publicSeasonSelect,
+      orderBy: { created_at: 'desc' },
+    });
+
+    return seasons.map(toPublicSeason);
+  }
+
+  async getPublicSeason(seasonId: string) {
+    const season = await this.prisma.season.findFirst({
+      where: {
+        id: seasonId,
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: publicSeasonSelect,
+    });
+      if (!season) throw new NotFoundException('Public season not found');
+    return toPublicSeason(season);
+  }
+
+    async getPublicSeasonOverview(seasonId: string) {
+      const season = await this.prisma.season.findFirst({
+        where: {
+          id: seasonId,
+          status: { not: 'DRAFT' },
+          deleted_at: null,
+          league: { is: { status: 'ACTIVE', deleted_at: null } },
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          status: true,
+          start_date: true,
+          end_date: true,
+          competition_timezone: true,
+          ruleset_name: true,
+          ruleset_version: true,
+          league: { select: { id: true, name: true } },
+          ruleset: {
+            select: {
+              season_id: true,
+              legacy_unassigned: true,
+              name: true,
+              version: true,
+              status: true,
+              rules: true,
+              published_at: true,
+            },
+          },
+          divisions: {
+            where: { active: true },
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              _count: {
+                select: {
+                  participants: {
+                    where: { status: 'ACTIVE', competition_selected: true },
+                  },
+                },
+              },
+            },
+            orderBy: { name: 'asc' },
+          },
+          phases: {
+            where: { status: { not: 'DRAFT' } },
+            orderBy: { phase_number: 'asc' },
+            select: {
+              phase_number: true,
+              phase_type: true,
+              name: true,
+              status: true,
+              start_at: true,
+              end_at: true,
+              series: {
+                where: { status: { not: 'DRAFT' } },
+                select: {
+                  status: true,
+                  match_window_start: true,
+                  games: {
+                    select: {
+                      status: true,
+                      result: true,
+                      result_version: true,
+                      result_verifications: {
+                        orderBy: { created_at: 'desc' },
+                        select: { result_version: true, status: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!season) throw new NotFoundException('Public season not found');
+
+      const divisions = season.divisions.map((division) => ({
+        id: division.id,
+        name: division.name,
+        type: division.type,
+        participantCount: division._count.participants,
+      }));
+      const phases = season.phases.map((phase) => {
+        const scheduledSeriesCount = phase.series.filter((series) => series.match_window_start !== null).length;
+        return {
+          number: phase.phase_number,
+          type: phase.phase_type,
+          name: phase.name ?? `Phase ${phase.phase_number}`,
+          status: phase.status,
+          startAt: phase.start_at,
+          endAt: phase.end_at,
+          seriesCount: phase.series.length,
+          scheduledSeriesCount,
+        };
+      });
+      const series = season.phases.flatMap((phase) => phase.series);
+      const publishedResultsCount = series.reduce((total, item) => total + item.games.filter((game) => {
+        if (game.status !== 'COMPLETED' || game.result === null) return false;
+        const currentEvents = game.result_verifications.filter((event) => event.result_version === game.result_version);
+        const currentResolution = currentEvents.find((event) => event.status !== 'PENDING') ?? currentEvents[0];
+        return currentResolution
+          ? currentResolution.status === 'APPROVED'
+          : true;
+      }).length, 0);
+      const ruleset = season.ruleset;
+      let publishedRules: ReturnType<typeof buildPlayerFacingRules> | null = null;
+      if (ruleset?.season_id === season.id && !ruleset.legacy_unassigned && ruleset.status === 'PUBLISHED') {
+        try {
+          publishedRules = buildPlayerFacingRules(validateCompetitionRules(ruleset.rules), {
+            name: season.ruleset_name ?? ruleset.name,
+            version: season.ruleset_version ?? ruleset.version,
+          });
+        } catch {
+          publishedRules = null;
+        }
+      }
+
+      return {
+        id: season.id,
+        name: season.name,
+        description: season.description,
+        status: season.status,
+        startDate: season.start_date,
+        endDate: season.end_date,
+        timezone: season.competition_timezone,
+        league: season.league,
+        divisions,
+        participantCount: divisions.reduce((total, division) => total + division.participantCount, 0),
+        phases,
+        scheduledSeriesCount: phases.reduce((total, phase) => total + phase.scheduledSeriesCount, 0),
+        publishedResultsCount,
+        publishedRules,
+        rulesPublishedAt: publishedRules ? ruleset?.published_at ?? null : null,
+      };
+    }
+
   async listOpenRegistrationSeasons() {
     const now = new Date();
     const seasons = await this.prisma.season.findMany({
@@ -137,7 +351,11 @@ export class SeasonService {
             type: true,
             capacity: true,
             registration_capacity: true,
-            _count: { select: { participants: true } },
+            _count: {
+              select: {
+                participants: { where: { status: 'ACTIVE' } },
+              },
+            },
           },
           orderBy: { name: 'asc' },
         },

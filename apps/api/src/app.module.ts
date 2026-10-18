@@ -10,6 +10,7 @@ import { AuthzModule } from './common/authz/authz.module.js';
 import { UserModule } from './modules/user/user.module.js';
 import { PlayerModule } from './modules/player/player.module.js';
 import { ClubModule } from './modules/club/club.module.js';
+import { LeagueModule } from './modules/league/league.module.js';
 import { SeasonModule } from './modules/season/season.module.js';
 import { DisputeModule } from './modules/dispute/dispute.module.js';
 import { PenaltyModule } from './modules/penalty/penalty.module.js';
@@ -52,6 +53,7 @@ import { validate } from './config/env.validation.js';
     UserModule,
     PlayerModule,
     ClubModule,
+    LeagueModule,
     SeasonModule,
     DisputeModule,
     PenaltyModule,

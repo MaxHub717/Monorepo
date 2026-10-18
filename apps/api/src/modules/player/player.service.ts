@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { OutboxService } from '../events/outbox.service.js';
+import { CompetitionService } from '../competition/competition.service.js';
 import { UpdatePlayerProfileDto } from './dto/player-profile.dto.js';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class PlayerService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly outboxService: OutboxService,
+    private readonly competitionService: CompetitionService,
   ) {}
 
   async getPlayer(id: string, requesterId?: string, requesterRoles: string[] = []) {
@@ -47,15 +49,62 @@ export class PlayerService {
     return profile;
   }
 
-  async getCareer(id: string) {
-    const profile = await this.prisma.playerProfile.findUnique({ where: { id } });
+  async getCareer(id: string, requesterId?: string, requesterRoles: string[] = []) {
+    const profile = await this.prisma.playerProfile.findUnique({
+      where: { id },
+      select: { id: true, user_id: true, wins: true, losses: true, draws: true },
+    });
     if (!profile) throw new NotFoundException('Player not found');
+    const isOwner = requesterId === profile.user_id;
+    const isPrivileged = requesterRoles.includes('HQ_ADMIN') || requesterRoles.includes('COMMISSIONER');
+    if (!isOwner && !isPrivileged) throw new ForbiddenException('You cannot view this career');
     return {
       id: profile.id,
       matches: profile.wins + profile.losses + profile.draws,
       wins: profile.wins,
       losses: profile.losses,
       draws: profile.draws,
+    };
+  }
+
+  async getMyCareer(userId: string) {
+    const profile = await this.prisma.playerProfile.findUnique({
+      where: { user_id: userId },
+      select: { id: true, gamer_tag: true },
+    });
+    if (!profile) throw new NotFoundException('Player profile not found');
+    return {
+      player: { id: profile.id, gamerTag: profile.gamer_tag },
+      career: await this.competitionService.getPublicPlayerCareer(profile.id, profile.gamer_tag),
+    };
+  }
+
+  async listPublicPlayers() {
+    return this.prisma.playerProfile.findMany({
+      where: { public_profile: true, deleted_at: null },
+      select: { id: true, gamer_tag: true, region: true },
+      orderBy: { gamer_tag: 'asc' },
+    }).then((players) => players.map((player) => ({
+      id: player.id,
+      gamerTag: player.gamer_tag,
+      region: player.region,
+    })));
+  }
+
+  async getPublicProfile(id: string) {
+    const profile = await this.prisma.playerProfile.findFirst({
+      where: { id, public_profile: true, deleted_at: null },
+      select: { id: true, gamer_tag: true, region: true },
+    });
+    if (!profile) throw new NotFoundException('Public player profile not found');
+
+    return {
+      player: {
+        id: profile.id,
+        gamerTag: profile.gamer_tag,
+        region: profile.region,
+      },
+      career: await this.competitionService.getPublicPlayerCareer(profile.id, profile.gamer_tag),
     };
   }
 
@@ -126,6 +175,10 @@ export class PlayerService {
 
     if (dto.region !== undefined) {
       updateData.region = dto.region;
+    }
+
+    if (dto.publicProfile !== undefined) {
+      updateData.public_profile = dto.publicProfile;
     }
 
     if (dto.metadata !== undefined) {

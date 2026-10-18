@@ -60,5 +60,6 @@ function DevelopmentMailboxContent() {
 }
 
 export default function DevelopmentMailboxPage() {
+  if (process.env.NODE_ENV === 'production') return <main><h1>Not found</h1></main>;
   return <Suspense fallback={<main><h1>Local development email inbox</h1><p>Loading inbox...</p></main>}><DevelopmentMailboxContent /></Suspense>;
 }

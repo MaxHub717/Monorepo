@@ -472,6 +472,315 @@ describe('SeasonService player-facing season discovery', () => {
   });
 });
 
+describe('SeasonService public and registration discovery', () => {
+  it('exposes an admin-created season to public discovery only after publication', async () => {
+    let storedSeason: any = null;
+    const prisma: any = {
+      $transaction: (callback: any) => callback(prisma),
+      league: { findFirst: vi.fn().mockResolvedValue({ id: 'league-public', status: 'ACTIVE', deleted_at: null }) },
+      division: { create: vi.fn().mockResolvedValue({ id: 'division-public' }) },
+      season: {
+        create: vi.fn().mockImplementation(async ({ data }) => {
+          storedSeason = {
+            id: 'season-admin-created',
+            ...data,
+            registration_open_at: null,
+            registration_close_at: null,
+            competition_timezone: 'UTC',
+            deleted_at: null,
+            internal_config: { private: true },
+            league: { id: 'league-public', name: 'Public League', status: 'ACTIVE', deleted_at: null },
+            ruleset: { season_id: 'season-admin-created', rules: DEFAULT_COMPETITION_RULES },
+            divisions: [{ id: 'division-public', name: 'Division One', type: 'COMPETITIVE', active: true }],
+          };
+          return storedSeason;
+        }),
+        findUnique: vi.fn().mockImplementation(async () => storedSeason),
+        update: vi.fn().mockImplementation(async ({ data }) => {
+          storedSeason = { ...storedSeason, ...data };
+          return storedSeason;
+        }),
+        findMany: vi.fn().mockImplementation(async ({ where }) => (
+          storedSeason && where.status.not === 'DRAFT' && storedSeason.status !== 'DRAFT' ? [storedSeason] : []
+        )),
+      },
+    };
+    const outbox = { enqueueEvent: vi.fn().mockResolvedValue(undefined) };
+    const audit = { writeLog: vi.fn().mockResolvedValue(undefined) };
+    const service = new SeasonService(prisma, outbox as any, audit as any, {} as any);
+
+    await service.createSeason({
+      leagueId: 'league-public',
+      name: 'Admin Created Season',
+      startDate: '2027-01-01T00:00:00.000Z',
+      endDate: '2027-12-31T00:00:00.000Z',
+      divisionCapacity: 16,
+    });
+    expect(await service.listPublicSeasons()).toEqual([]);
+
+    const published = await service.publishSeason('season-admin-created', { id: 'admin-1', role: 'HQ_ADMIN' });
+    const publicSeasons = await service.listPublicSeasons();
+
+    expect(published.status).toBe('REGISTRATION_OPEN');
+    expect(publicSeasons).toEqual([expect.objectContaining({
+      id: 'season-admin-created',
+      name: 'Admin Created Season',
+      status: 'REGISTRATION_OPEN',
+    })]);
+    expect(publicSeasons[0]).not.toHaveProperty('internal_config');
+    expect(prisma.season.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      }),
+    }));
+  });
+
+  it('keeps a season public after its registration close time has passed', async () => {
+    const findMany = vi.fn().mockResolvedValue([{
+      id: 'season-closed',
+      name: 'NGL 2026 SEASON 1',
+      description: 'Public season with registration closed',
+      status: 'REGISTRATION_OPEN',
+      start_date: new Date('2026-10-14T00:00:00.000Z'),
+      end_date: new Date('2026-10-28T00:00:00.000Z'),
+      registration_open_at: new Date('2026-10-12T19:35:17.610Z'),
+      registration_close_at: new Date('2026-10-13T00:00:00.000Z'),
+      competition_timezone: 'UTC',
+      deleted_at: null,
+      internal_config: { hidden: true },
+      league: { id: 'league-1', name: 'NGL League' },
+      divisions: [{ id: 'division-1', name: 'Division 1', type: 'COMPETITIVE' }],
+    }]);
+    const service = new SeasonService(
+      { season: { findMany } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.listPublicSeasons();
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+    }));
+    expect(result).toEqual([expect.objectContaining({
+      id: 'season-closed',
+      name: 'NGL 2026 SEASON 1',
+      status: 'REGISTRATION_OPEN',
+      registrationCloseAt: new Date('2026-10-13T00:00:00.000Z'),
+      divisions: [{ id: 'division-1', name: 'Division 1', type: 'COMPETITIVE' }],
+    })]);
+    expect(result[0]).not.toHaveProperty('internal_config');
+  });
+
+  it('returns public overview empty states and only the selected season published rules', async () => {
+    const season: any = {
+      id: 'season-public',
+      name: 'Public Season',
+      description: 'Season overview',
+      status: 'REGISTRATION_OPEN',
+      start_date: new Date('2026-10-14T00:00:00.000Z'),
+      end_date: new Date('2026-10-28T00:00:00.000Z'),
+      competition_timezone: 'UTC',
+      league: { id: 'league-1', name: 'NGL League' },
+      ruleset_name: null,
+      ruleset_version: null,
+      ruleset: {
+        season_id: 'season-public',
+        legacy_unassigned: false,
+        name: 'Public Season Rules',
+        version: '1.0.0',
+        status: 'DRAFT',
+        rules: DEFAULT_COMPETITION_RULES,
+        published_at: null,
+      },
+      divisions: [],
+      phases: [],
+    };
+    const findFirst = vi.fn().mockResolvedValue(season);
+    const service = new SeasonService(
+      { season: { findFirst } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const draftOverview = await service.getPublicSeasonOverview('season-public');
+    expect(draftOverview).toMatchObject({
+      participantCount: 0,
+      phases: [],
+      scheduledSeriesCount: 0,
+      publishedResultsCount: 0,
+      publishedRules: null,
+      rulesPublishedAt: null,
+    });
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: 'season-public',
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: expect.not.objectContaining({ competition_config: true }),
+    }));
+
+    season.ruleset = { ...season.ruleset, status: 'PUBLISHED', published_at: new Date('2026-10-09T12:00:00.000Z') };
+    season.divisions = [{
+      id: 'division-1',
+      name: 'Division One',
+      type: 'COMPETITIVE',
+      _count: { participants: 2 },
+    }];
+    season.phases = [{
+      phase_number: 1,
+      phase_type: 'QUALIFYING',
+      name: null,
+      status: 'ACTIVE',
+      start_at: new Date('2026-10-14T00:00:00.000Z'),
+      end_at: new Date('2026-10-21T00:00:00.000Z'),
+      series: [{ status: 'SCHEDULED', match_window_start: new Date('2026-10-16T12:00:00.000Z'), games: [] }],
+    }];
+    const populatedOverview = await service.getPublicSeasonOverview('season-public');
+    expect(populatedOverview).toMatchObject({
+      participantCount: 2,
+      phases: [{ name: 'Phase 1', seriesCount: 1, scheduledSeriesCount: 1 }],
+      scheduledSeriesCount: 1,
+      publishedRules: expect.objectContaining({ name: 'Public Season Rules', version: '1.0.0' }),
+      rulesPublishedAt: new Date('2026-10-09T12:00:00.000Z'),
+    });
+
+    season.ruleset = { ...season.ruleset, season_id: 'another-season' };
+    const mismatchedRulesOverview = await service.getPublicSeasonOverview('season-public');
+    expect(mismatchedRulesOverview.publishedRules).toBeNull();
+  });
+
+  it('returns one publicly visible season without internal fields', async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'season-public',
+      name: 'Published Season',
+      description: 'Public details',
+      status: 'REGISTRATION_CLOSED',
+      start_date: new Date('2026-10-14T00:00:00.000Z'),
+      end_date: new Date('2026-10-28T00:00:00.000Z'),
+      registration_open_at: null,
+      registration_close_at: null,
+      competition_timezone: 'UTC',
+      league: { id: 'league-1', name: 'NGL League' },
+      divisions: [{ id: 'division-1', name: 'Division 1', type: 'COMPETITIVE' }],
+    });
+    const service = new SeasonService(
+      { season: { findFirst } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.getPublicSeason('season-public');
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: 'season-public',
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: expect.not.objectContaining({ competition_config: true, ruleset: true }),
+    }));
+    expect(result).toMatchObject({ id: 'season-public', status: 'REGISTRATION_CLOSED' });
+    expect(result).not.toHaveProperty('competition_config');
+    expect(result).not.toHaveProperty('ruleset');
+  });
+
+  it('queries registration discovery with status, date, close-time, and active-division gates', async () => {
+    const now = new Date('2026-10-16T12:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const service = new SeasonService(
+        { season: { findMany } } as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      await service.listOpenRegistrationSeasons();
+
+      expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: {
+          status: 'REGISTRATION_OPEN',
+          start_date: { not: null },
+          end_date: { not: null },
+          OR: [{ registration_close_at: null }, { registration_close_at: { gt: now } }],
+        },
+        select: expect.objectContaining({
+          divisions: expect.objectContaining({
+            where: { active: true },
+            select: expect.objectContaining({
+              _count: { select: { participants: { where: { status: 'ACTIVE' } } } },
+            }),
+          }),
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('omits missing-date seasons and seasons whose active divisions are all full', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: 'missing-start',
+        start_date: null,
+        end_date: new Date('2026-12-31T00:00:00.000Z'),
+        divisions: [{ registration_capacity: null, _count: { participants: 0 } }],
+      },
+      {
+        id: 'full-season',
+        start_date: new Date('2026-10-14T00:00:00.000Z'),
+        end_date: new Date('2026-10-28T00:00:00.000Z'),
+        divisions: [{ registration_capacity: 20, _count: { participants: 20 } }],
+      },
+      {
+        id: 'inactive-only-season',
+        start_date: new Date('2026-10-14T00:00:00.000Z'),
+        end_date: new Date('2026-10-28T00:00:00.000Z'),
+        divisions: [],
+      },
+      {
+        id: 'available-season',
+        start_date: new Date('2026-10-14T00:00:00.000Z'),
+        end_date: new Date('2026-10-28T00:00:00.000Z'),
+        divisions: [{ registration_capacity: 20, _count: { participants: 19 } }],
+      },
+      {
+        id: 'unlimited-season',
+        start_date: new Date('2026-10-14T00:00:00.000Z'),
+        end_date: new Date('2026-10-28T00:00:00.000Z'),
+        divisions: [{ registration_capacity: null, _count: { participants: 100 } }],
+      },
+    ]);
+    const service = new SeasonService(
+      { season: { findMany } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const result = await service.listOpenRegistrationSeasons();
+
+    expect(result.map((season) => season.id)).toEqual(['available-season', 'unlimited-season']);
+    expect(result[0].divisions[0].availableSlots).toBe(1);
+    expect(result[1].divisions[0].availableSlots).toBeNull();
+  });
+});
+
 describe('SeasonService competition-field activation readiness', () => {
   const eligibleParticipants = Array.from({ length: 64 }, (_, index) => ({
     player_id: `player-${index + 1}`,

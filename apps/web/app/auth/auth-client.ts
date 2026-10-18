@@ -55,6 +55,8 @@ export type AuthenticatedUser = {
   id: string;
   email: string;
   username?: string;
+  accountStatus: string;
+  emailVerifiedAt: string | null;
   roles: string[];
   permissions: string[];
 };
@@ -91,6 +93,8 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     id: user.id,
     email: user.email,
     username: user.username,
+    accountStatus: user.account_status ?? 'UNKNOWN',
+    emailVerifiedAt: user.email_verified_at ?? null,
     roles: user.user_roles?.map((userRole) => userRole.role.name) ?? [],
     permissions: user.permissions ?? [],
   };

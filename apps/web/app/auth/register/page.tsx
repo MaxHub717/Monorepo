@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { register, resendVerification } from '../auth-client';
+import { getSafeReturnTo } from '../return-to';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -11,6 +12,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [pendingReturnTo, setPendingReturnTo] = useState<string | null>(null);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
@@ -22,6 +24,7 @@ export default function RegisterPage() {
     try {
       await register(email, username, gamerTag, password);
       setPendingEmail(email);
+      setPendingReturnTo(getSafeReturnTo(window.location.search));
     } catch (err: any) {
       setError(err?.message ?? 'Registration failed');
     } finally {
@@ -54,14 +57,15 @@ export default function RegisterPage() {
         <button type="button" onClick={resend} disabled={resending}>{resending ? 'Sending...' : 'Resend verification email'}</button>
         {resendMessage && <p role="status">{resendMessage}</p>}
         {resendError && <p role="alert">{resendError}</p>}
-        <p><Link href="/auth/login">Already verified? Go to login</Link></p>
+        <p><Link href={pendingReturnTo ? `/auth/login?returnTo=${encodeURIComponent(pendingReturnTo)}` : '/auth/login'}>Already verified? Go to login</Link></p>
       </main>
     );
   }
 
   return (
     <main>
-      <h1>Register</h1>
+      <h1>Create League Identity</h1>
+      <p>Already have an account? <Link href="/auth/login">Sign in</Link></p>
       <form onSubmit={submit}>
         <label>
           Email

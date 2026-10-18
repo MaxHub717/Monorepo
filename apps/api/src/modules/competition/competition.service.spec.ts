@@ -217,6 +217,46 @@ describe('Competition ruleset administration', () => {
     }));
   });
 
+  it('exposes public rules only when the current ruleset belongs to the season and is published', async () => {
+    const season = {
+      id: 'season-1',
+      ruleset: {
+        id: 'ruleset-1',
+        season_id: 'season-1',
+        legacy_unassigned: false,
+        name: 'Season Rules',
+        version: '1.0.0',
+        status: 'DRAFT',
+        rules: DEFAULT_COMPETITION_RULES,
+        rules_hash: null,
+        published_at: null,
+      },
+    };
+    const findUnique = vi.fn().mockImplementation(async () => season);
+    const service = new CompetitionService({ season: { findUnique } } as any, {} as any);
+
+    await expect(service.getPlayerFacingSeasonRules('season-1')).resolves.toMatchObject({
+      available: false,
+      status: 'VALID',
+      playerFacing: null,
+    });
+
+    season.ruleset = {
+      ...season.ruleset,
+      status: 'PUBLISHED',
+      rules_hash: 'a'.repeat(64),
+      published_at: new Date('2026-10-09T12:00:00.000Z'),
+    };
+    await expect(service.getPlayerFacingSeasonRules('season-1')).resolves.toMatchObject({
+      available: true,
+      status: 'PUBLISHED',
+      playerFacing: expect.objectContaining({ name: 'Season Rules', version: '1.0.0' }),
+    });
+
+    season.ruleset = { ...season.ruleset, season_id: 'another-season' };
+    await expect(service.getPlayerFacingSeasonRules('season-1')).rejects.toThrow('does not belong to this season');
+  });
+
   it('rejects cross-season rules access and invalid rule documents with useful messages', async () => {
     const publishedRuleset = {
       id: 'ruleset-old',
@@ -242,6 +282,431 @@ describe('Competition ruleset administration', () => {
     await expect(service.getSeasonRules('season-1')).rejects.toThrow('does not belong to this season');
     await expect(service.saveSeasonRules('season-1', { ...DEFAULT_COMPETITION_RULES, seriesGameRules: { gamesPerSeries: 2 } }, {}))
       .rejects.toThrow('A Series must contain exactly three Games.');
+  });
+});
+
+describe('Public competition schedule', () => {
+  it('returns public phase and scheduled-series fields without operational metadata', async () => {
+    const series = {
+      id: 'series-private-id',
+      series_number: 1,
+      status: 'SCHEDULED',
+      participant_player_ids: ['player-1', 'player-2'],
+      match_window_start: new Date('2026-10-17T01:00:00.000Z'),
+      schedule_key: 'internal-schedule-key',
+      check_in_opens_at: new Date('2026-10-17T00:00:00.000Z'),
+      games: [{ game_number: 1, home_player_id: 'player-1', away_player_id: 'player-2' }],
+    };
+    const seasonFindFirst = vi.fn().mockResolvedValue({
+      id: 'season-1',
+      name: 'Public Season',
+      status: 'ACTIVE',
+      competition_timezone: 'America/Los_Angeles',
+      phases: [{
+        phase_number: 1,
+        phase_type: 'QUALIFYING',
+        name: 'Qualifying',
+        status: 'ACTIVE',
+        start_at: new Date('2026-10-16T00:00:00.000Z'),
+        end_at: new Date('2026-10-23T00:00:00.000Z'),
+        plots: [{ series: [series] }],
+      }],
+    });
+    const profileFindMany = vi.fn().mockResolvedValue([
+      { id: 'player-1', gamer_tag: 'NorthStar' },
+      { id: 'player-2', gamer_tag: 'BlueComet' },
+    ]);
+    const service = new CompetitionService({
+      season: { findFirst: seasonFindFirst },
+      playerProfile: { findMany: profileFindMany },
+    } as any, {} as any);
+
+    const result = await service.getPublicSeasonSchedule('season-1');
+
+    expect(seasonFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: 'season-1',
+        status: { not: 'DRAFT' },
+        deleted_at: null,
+        league: { is: { status: 'ACTIVE', deleted_at: null } },
+      },
+      select: expect.not.objectContaining({ competition_config: true, ruleset: true }),
+    }));
+    const selectedSeries = seasonFindFirst.mock.calls[0][0].select.phases.select.plots.select.series.select;
+    expect(selectedSeries).not.toHaveProperty('schedule_key');
+    expect(selectedSeries).not.toHaveProperty('check_in_opens_at');
+    expect(selectedSeries).not.toHaveProperty('check_in_closes_at');
+    expect(selectedSeries).not.toHaveProperty('match_window_end');
+    expect(selectedSeries).not.toHaveProperty('results_deadline_at');
+    expect(selectedSeries).not.toHaveProperty('configuration');
+    expect(result).toEqual({
+      season: { id: 'season-1', name: 'Public Season', status: 'ACTIVE', timezone: 'America/Los_Angeles' },
+      phases: [{
+        number: 1,
+        type: 'QUALIFYING',
+        name: 'Qualifying',
+        status: 'ACTIVE',
+        startAt: new Date('2026-10-16T00:00:00.000Z'),
+        endAt: new Date('2026-10-23T00:00:00.000Z'),
+        series: [{
+          id: 'series-private-id',
+          number: 1,
+          status: 'SCHEDULED',
+          scheduledAt: new Date('2026-10-17T01:00:00.000Z'),
+          participants: ['NorthStar', 'BlueComet'],
+        }],
+      }],
+    });
+    expect(JSON.stringify(result)).not.toContain('player-1');
+    expect(JSON.stringify(result)).not.toContain('internal-schedule-key');
+  });
+
+  it('returns persisted lifecycle states and an empty phase list when no phases exist', async () => {
+    const seasonFindFirst = vi.fn().mockResolvedValue({
+      id: 'season-1',
+      name: 'Registration Season',
+      status: 'REGISTRATION_OPEN',
+      competition_timezone: 'UTC',
+      phases: [],
+    });
+    const profileFindMany = vi.fn();
+    const service = new CompetitionService({
+      season: { findFirst: seasonFindFirst },
+      playerProfile: { findMany: profileFindMany },
+    } as any, {} as any);
+
+    const result = await service.getPublicSeasonSchedule('season-1');
+
+    expect(result.season.status).toBe('REGISTRATION_OPEN');
+    expect(result.phases).toEqual([]);
+    expect(profileFindMany).not.toHaveBeenCalled();
+  });
+
+  it('passes persisted phase and series lifecycle states through without deriving them', async () => {
+    const seasonFindFirst = vi.fn().mockResolvedValue({
+      id: 'season-1',
+      name: 'Completed Season',
+      status: 'COMPLETED',
+      competition_timezone: 'UTC',
+      phases: [{
+        phase_number: 2,
+        phase_type: 'PLAYOFF',
+        name: null,
+        status: 'COMPLETED',
+        start_at: null,
+        end_at: null,
+        plots: [{ series: [
+          {
+            id: 'series-in-progress',
+            series_number: 1,
+            status: 'IN_PROGRESS',
+            participant_player_ids: [],
+            match_window_start: null,
+            games: [],
+          },
+          {
+            id: 'series-eliminated',
+            series_number: 2,
+            status: 'ELIMINATED',
+            participant_player_ids: [],
+            match_window_start: new Date('2026-10-16T12:00:00.000Z'),
+            games: [],
+          },
+        ] }],
+      }],
+    });
+    const service = new CompetitionService({
+      season: { findFirst: seasonFindFirst },
+      playerProfile: { findMany: vi.fn().mockResolvedValue([]) },
+    } as any, {} as any);
+
+    const result = await service.getPublicSeasonSchedule('season-1');
+
+    expect(result.season.status).toBe('COMPLETED');
+    expect(result.phases).toMatchObject([{
+      number: 2,
+      type: 'PLAYOFF',
+      name: 'Phase 2',
+      status: 'COMPLETED',
+      series: [
+        { number: 1, status: 'IN_PROGRESS', scheduledAt: null },
+        { number: 2, status: 'ELIMINATED', scheduledAt: new Date('2026-10-16T12:00:00.000Z') },
+      ],
+    }]);
+  });
+});
+
+describe('Public series details and results', () => {
+  function createPublicSeries(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'series-public',
+      series_number: 3,
+      status: 'IN_PROGRESS',
+      participant_player_ids: ['player-1', 'player-2'],
+      match_window_start: new Date('2026-10-17T01:00:00.000Z'),
+      resolution_state: 'IN_PROGRESS',
+      winner_player_id: null,
+      elimination_outcome: null,
+      season: {
+        id: 'season-1',
+        name: 'Public Season',
+        status: 'ACTIVE',
+        competition_timezone: 'America/Los_Angeles',
+        league: { id: 'league-1', name: 'NGL League' },
+      },
+      phase: { phase_number: 2, phase_type: 'PLAYOFF', name: 'Finals', status: 'ACTIVE' },
+      games: [{
+        id: 'game-private-id',
+        game_number: 1,
+        home_player_id: 'player-1',
+        away_player_id: 'player-2',
+        winner_player_id: 'player-1',
+        home_score: 3,
+        away_score: 1,
+        result: 'HOME_WIN',
+        result_version: 2,
+        status: 'COMPLETED',
+        completed_at: new Date('2026-10-17T02:00:00.000Z'),
+        disputes: [],
+        result_verifications: [{ result_version: 2, status: 'PENDING' }],
+      }],
+      disputes: [],
+      resolution_audits: [],
+      ...overrides,
+    };
+  }
+
+  function createPublicCompetitionService(series: ReturnType<typeof createPublicSeries>) {
+    return new CompetitionService({
+      series: { findFirst: vi.fn().mockResolvedValue(series), findMany: vi.fn().mockResolvedValue([series]) },
+      season: { findFirst: vi.fn().mockResolvedValue({
+        id: 'season-1', name: 'Public Season', status: 'ACTIVE', competition_timezone: 'America/Los_Angeles',
+        league: { id: 'league-1', name: 'NGL League' },
+      }) },
+      playerProfile: { findMany: vi.fn().mockResolvedValue([
+        { id: 'player-1', gamer_tag: 'NorthStar' },
+        { id: 'player-2', gamer_tag: 'BlueComet' },
+      ]) },
+    } as any, {} as any);
+  }
+
+  it('hides pending and disputed results and excludes internal fields', async () => {
+    const series = createPublicSeries({
+      status: 'DISPUTED',
+      disputes: [{ id: 'dispute-private-id' }],
+    });
+    const service = createPublicCompetitionService(series);
+
+    const result = await service.getPublicSeriesDetail('series-public');
+
+    expect(result.games[0]).toMatchObject({
+      status: 'COMPLETED',
+      resultStatus: 'NOT_PUBLISHED',
+      result: null,
+    });
+    expect(result.finalResult).toBeNull();
+    expect(result.participants).toEqual(['NorthStar', 'BlueComet']);
+    expect(JSON.stringify(result)).not.toContain('player-1');
+    expect(JSON.stringify(result)).not.toContain('game-private-id');
+    expect(JSON.stringify(result)).not.toContain('dispute-private-id');
+  });
+
+  it('does not republish an older approval when the current result version is pending', async () => {
+    const series = createPublicSeries({
+      games: [{
+        ...createPublicSeries().games[0],
+        result_verifications: [
+          { result_version: 2, status: 'PENDING' },
+          { result_version: 2, status: 'APPROVED' },
+        ],
+      }],
+    });
+    const result = await createPublicCompetitionService(series).getPublicSeriesDetail('series-public');
+
+    expect(result.games[0]).toMatchObject({ resultStatus: 'NOT_PUBLISHED', result: null });
+  });
+
+  it('publishes only the current approved game version and audited final advancement', async () => {
+    const series = createPublicSeries({
+      status: 'COMPLETED',
+      resolution_state: 'RESOLVED',
+      elimination_outcome: 'WINNER_ADVANCES',
+      resolution_audits: [{ outcome: 'WINNER_ADVANCES', advancing_player_id: 'player-1' }],
+      games: [1, 2, 3].map((gameNumber) => ({
+        ...createPublicSeries().games[0],
+        id: `game-${gameNumber}`,
+        game_number: gameNumber,
+        result_version: 2,
+        result_verifications: [
+          { result_version: 1, status: 'APPROVED' },
+          { result_version: 2, status: 'OVERRIDDEN' },
+        ],
+      })),
+    });
+    const service = createPublicCompetitionService(series);
+
+    const result = await service.getPublicSeriesDetail('series-public');
+
+    expect(result.games).toHaveLength(3);
+    expect(result.games.every((game) => game.resultStatus === 'PUBLISHED')).toBe(true);
+    expect(result.finalResult).toEqual({
+      status: 'COMPLETED',
+      outcome: 'WINNER_ADVANCES',
+      advancingParticipant: 'NorthStar',
+    });
+  });
+
+  it('lists only series with published game results or an established final result', async () => {
+    const published = createPublicSeries({
+      games: [{
+        ...createPublicSeries().games[0],
+        result_verifications: [{ result_version: 2, status: 'APPROVED' }],
+      }],
+    });
+    const pending = createPublicSeries({ id: 'series-pending' });
+    const service = createPublicCompetitionService(published);
+    (service as any).prisma.series.findMany = vi.fn().mockResolvedValue([published, pending]);
+
+    const result = await service.getPublicSeasonResults('season-1');
+
+    expect(result.results.map((entry) => entry.id)).toEqual(['series-public']);
+  });
+
+  it('builds player career only from publicly visible series with published results', async () => {
+    const published = createPublicSeries({
+      games: [{
+        ...createPublicSeries().games[0],
+        result_verifications: [{ result_version: 2, status: 'APPROVED' }],
+      }],
+    });
+    const pending = createPublicSeries({ id: 'series-pending' });
+    const seriesFindMany = vi.fn().mockResolvedValue([published, pending]);
+    const playerProfileFindMany = vi.fn().mockResolvedValue([
+      { id: 'player-1', gamer_tag: 'NorthStar' },
+      { id: 'player-2', gamer_tag: 'BlueComet' },
+    ]);
+    const service = new CompetitionService({
+      series: { findMany: seriesFindMany },
+      playerProfile: { findMany: playerProfileFindMany },
+    } as any, {} as any);
+
+    const result = await service.getPublicPlayerCareer('player-1', 'NorthStar');
+
+    expect(seriesFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { not: 'DRAFT' },
+        phase: { is: { status: { not: 'DRAFT' } } },
+        plot: { is: { status: { not: 'ARCHIVED' } } },
+      }),
+    }));
+    expect(result).toHaveLength(1);
+    expect(result[0].seriesId).toBe('series-public');
+    expect(result[0].games).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain('player-1');
+    expect(JSON.stringify(result)).not.toContain('game-private-id');
+  });
+});
+
+describe('Personal player schedule and check-in', () => {
+  const userId = '50000000-0000-4000-8000-000000000001';
+  const playerId = attendancePlayerIds[0];
+  const opponentId = attendancePlayerIds[1];
+
+  function createPersonalScheduleService(checkedInAt: Date | null = null) {
+    const series = {
+      id: attendanceSeriesId,
+      series_number: 2,
+      status: 'SCHEDULED',
+      participant_player_ids: [playerId, opponentId],
+      check_in_opens_at: new Date('2027-01-04T11:00:00.000Z'),
+      check_in_closes_at: new Date('2027-01-04T11:30:00.000Z'),
+      match_window_start: new Date('2027-01-04T12:00:00.000Z'),
+      match_window_end: new Date('2027-01-04T13:00:00.000Z'),
+      results_deadline_at: new Date('2027-01-04T13:30:00.000Z'),
+      phase_id: '30000000-0000-4000-8000-000000000001',
+      phase: { phase_number: 1, name: 'Opening Phase', schedule_locked: true },
+      season: {
+        id: 'season-personal',
+        name: 'Personal Season',
+        competition_timezone: 'America/Los_Angeles',
+        league: { name: 'NGL' },
+      },
+      games: [{ game_number: 1, home_player_id: playerId, away_player_id: opponentId }],
+      check_ins: checkedInAt ? [{ checked_in_at: checkedInAt }] : [],
+    };
+    const prisma = {
+      playerProfile: {
+        findUnique: vi.fn().mockResolvedValue({ id: playerId }),
+        findMany: vi.fn().mockResolvedValue([
+          { id: playerId, gamer_tag: 'MyTag' },
+          { id: opponentId, gamer_tag: 'OpponentTag' },
+        ]),
+      },
+      series: { findMany: vi.fn().mockResolvedValue([series]) },
+    };
+    return { series, prisma, service: new CompetitionService(prisma as any, {} as any) };
+  }
+
+  it('filters personal schedule by the session-owned player and exposes only permitted series data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2027-01-04T10:00:00.000Z'));
+    try {
+      const { prisma, service } = createPersonalScheduleService();
+      const result = await service.getPlayerSchedule(userId);
+
+      expect(prisma.playerProfile.findUnique).toHaveBeenCalledWith({
+        where: { user_id: userId },
+        select: { id: true },
+      });
+      expect(prisma.series.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { participant_player_ids: { array_contains: [playerId] } },
+            { games: { some: { OR: [{ home_player_id: playerId }, { away_player_id: playerId }] } } },
+          ]),
+        }),
+      }));
+      expect(result.entries).toEqual([expect.objectContaining({
+        seriesId: attendanceSeriesId,
+        opponent: 'OpponentTag',
+        timezone: 'America/Los_Angeles',
+        canCheckIn: false,
+        checkInState: 'NOT_OPEN',
+      })]);
+      expect(JSON.stringify(result)).not.toContain(playerId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens check-in at the backend boundary and closes it at the exact closing instant', async () => {
+    for (const [serverTime, expected] of [
+      ['2027-01-04T11:00:00.000Z', true],
+      ['2027-01-04T11:30:00.000Z', false],
+    ] as const) {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(serverTime));
+      try {
+        const { service } = createPersonalScheduleService();
+        const result = await service.getPlayerSchedule(userId);
+        expect(result.entries[0].canCheckIn).toBe(expected);
+        expect(result.entries[0].checkInState).toBe(expected ? 'OPEN' : 'CLOSED');
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  });
+
+  it('derives the check-in player from the authenticated account and rejects a mismatched actor', async () => {
+    const { prisma, service } = createPersonalScheduleService();
+    const recordCheckIn = vi.spyOn(service, 'recordSeriesCheckIn').mockResolvedValue({ alreadyCheckedIn: false } as any);
+
+    await service.recordPlayerSeriesCheckIn(attendanceSeriesId, userId, { id: userId });
+
+    expect(recordCheckIn).toHaveBeenCalledWith(attendanceSeriesId, playerId, {}, { id: userId });
+    await expect(service.recordPlayerSeriesCheckIn(attendanceSeriesId, 'another-user', { id: userId }))
+      .rejects.toThrow('only check in their own account');
+    expect(prisma.playerProfile.findUnique).toHaveBeenCalledTimes(1);
   });
 });
 

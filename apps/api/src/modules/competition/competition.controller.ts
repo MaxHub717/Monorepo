@@ -236,3 +236,24 @@ export class CompetitionController {
     };
   }
 }
+
+@Controller('competition/me')
+@UseGuards(AuthGuard, AccountStatusGuard)
+export class PlayerCompetitionController {
+  constructor(private readonly competitionService: CompetitionService) {}
+
+  @Get('schedule')
+  getMySchedule(@Req() request: any) {
+    return this.competitionService.getPlayerSchedule(request.user.id);
+  }
+
+  @Post('series/:seriesId/check-in')
+  checkIn(@Param('seriesId', new ParseUUIDPipe()) seriesId: string, @Req() request: any) {
+    return this.competitionService.recordPlayerSeriesCheckIn(seriesId, request.user.id, {
+      id: request.user.id,
+      role: request.user.roles?.[0],
+      requestId: request.id,
+      permissions: request.user.permissions ?? [],
+    });
+  }
+}

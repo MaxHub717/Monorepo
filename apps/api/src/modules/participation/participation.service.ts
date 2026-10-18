@@ -127,44 +127,33 @@ export class ParticipationService {
         if (existing.status === 'ACTIVE') {
           throw new BadRequestException('Player is already registered in this division');
         }
-
-        const participant = await tx.divisionParticipant.update({
-          where: { id: existing.id },
-          data: { status: 'ACTIVE', withdrawn_at: null, seed: input.seed ?? existing.seed },
-          include: { player: true, division: true },
-        });
-
-        await this.outbox.enqueueEvent(tx, {
-          eventName: 'season.player_registered',
-          aggregateType: 'DivisionParticipant',
-          aggregateId: participant.id,
-          actorId: actor?.id,
-          actorRole: actor?.role,
-          correlationId: actor?.correlationId,
-          metadata: { participant },
-        });
-        return participant;
       }
 
-      if (division.registration_capacity !== null) {
+      if (division.registration_capacity !== null && division.registration_capacity !== undefined) {
         const registrationCount = await tx.divisionParticipant.count({
-          where: { division_id: divisionId },
+          where: { division_id: divisionId, status: 'ACTIVE' },
         });
         if (registrationCount >= division.registration_capacity) {
           throw new BadRequestException('Division has reached its registration capacity');
         }
       }
 
-      const participant = await tx.divisionParticipant.create({
-        data: {
-          season_id: seasonId,
-          division_id: divisionId,
-          player_id: input.playerId,
-          seed: input.seed,
-          status: 'ACTIVE',
-        },
-        include: { player: true, division: true },
-      });
+      const participant = existing
+        ? await tx.divisionParticipant.update({
+            where: { id: existing.id },
+            data: { status: 'ACTIVE', withdrawn_at: null, seed: input.seed ?? existing.seed },
+            include: { player: true, division: true },
+          })
+        : await tx.divisionParticipant.create({
+            data: {
+              season_id: seasonId,
+              division_id: divisionId,
+              player_id: input.playerId,
+              seed: input.seed,
+              status: 'ACTIVE',
+            },
+            include: { player: true, division: true },
+          });
 
       await this.outbox.enqueueEvent(tx, {
         eventName: 'season.player_registered',

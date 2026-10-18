@@ -4,10 +4,13 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useEffect, useRef, useState, Suspense } from 'react';
 import { resendVerification, verifyEmail } from '../auth-client';
+import { getSafeReturnTo } from '../return-to';
 
 function VerifyPageContent() {
   const params = useSearchParams();
   const token = params.get('token');
+  const returnTo = getSafeReturnTo(params.toString());
+  const loginHref = returnTo ? `/auth/login?returnTo=${encodeURIComponent(returnTo)}` : '/auth/login';
   const [status, setStatus] = useState<'verifying' | 'success' | 'invalid' | 'error' | 'missing'>(token ? 'verifying' : 'missing');
   const [retry, setRetry] = useState(0);
   const requestRef = useRef<{ token: string; request: Promise<{ success: boolean }> } | null>(null);
@@ -60,7 +63,7 @@ function VerifyPageContent() {
     <main>
       <h1>Email verification</h1>
       {status === 'verifying' && <p role="status">Verifying your email address...</p>}
-      {status === 'success' && <><p role="status">Your email is verified. You can now sign in.</p><Link href="/auth/login">Go to login</Link></>}
+      {status === 'success' && <><p role="status">Your email is verified. Your account is active and you can now sign in.</p><Link href={loginHref}>Go to login</Link></>}
       {status === 'invalid' && <><p role="alert">This verification link is invalid, expired, or already used. Request a new link below.</p><button type="button" onClick={() => { setStatus('verifying'); setRetry((attempt) => attempt + 1); }}>Retry verification</button></>}
       {status === 'error' && <><p role="alert">We could not verify your email because of a server or connection error. Retry, or request another link below.</p><button type="button" onClick={() => { setStatus('verifying'); setRetry((attempt) => attempt + 1); }}>Retry verification</button></>}
       {status === 'missing' && <p role="alert">This page needs the verification link from your email. You can request a fresh link below.</p>}

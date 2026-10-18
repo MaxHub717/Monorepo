@@ -1,0 +1,902 @@
+ Public Website Specification
+
+NexGen League — Canonical Player & Public Website Specification
+
+**Document status:** Canonical product specification for implementation  
+**Version:** 1.0  
+**Product:** NexGen League Platform  
+**Scope:** Public website and connected gamer experience  
+**Out of scope:** ArenaX application, new competition engine, duplicated backend models  
+**Primary implementation repository:** `MaxHub717/Nexgen_E-sport`  
+**Architecture principle:** One League Platform backend, multiple connected experiences
+
+---
+
+## 1. Purpose
+
+The NexGen League website is the public-facing gateway to the League Platform. It allows anyone to discover leagues, understand their seasons, follow competition progress, inspect schedules, view results, and discover competing players without creating an account.
+
+Gamers who want to compete can create an account, establish their league identity, register for eligible seasons, and access personal competition features.
+
+Administrators continue using their dedicated admin workspace to manage league operations.
+
+The website and gamer experience must use the existing League Platform backend as their authoritative data source. The future ArenaX application must be able to consume the same authoritative data without requiring a separate competition database or competing source of truth.
+
+### 1.1 Product statement
+
+NexGen League is a public competition platform that enables people to follow esports competitions and gives gamers a connected pathway from discovering a league to building a competitive career.
+
+### 1.2 Core principle
+
+**Public information is accessible without an account. Participation and personal features require authentication and the appropriate permissions.**
+
+A visitor must never have to become a competitor simply to follow a league.
+
+---
+
+## 2. Product goals
+
+1. Make leagues and seasons discoverable to the public.
+2. Present competition progress in a clear, understandable format.
+3. Let visitors follow phases, series schedules, participants, and results.
+4. Provide a straightforward pathway from visitor to registered gamer.
+5. Connect gamer registration to the existing season and division participation system.
+6. Give signed-in gamers personal competition information without hiding public competition information behind authentication.
+7. Preserve the dedicated administrative experience.
+8. Establish a reusable public-facing data layer that can support the future ArenaX app.
+9. Replace mock competition content with real backend data as each feature is implemented.
+10. Make the platform reliable, accessible, responsive, and understandable on desktop and mobile.
+
+## 3. Audiences and access levels
+
+### 3.1 Visitor
+
+A visitor is anyone browsing without an authenticated account. This includes fans, parents, scouts, potential sponsors, club representatives, and prospective gamers.
+
+Visitors can:
+
+- View the public homepage.
+- Discover publicly visible leagues and seasons.
+- View public season details and published rules.
+- Follow phases and competition progress.
+- View published schedules and public series details.
+- View publicly available participants and player profiles.
+- View results that are authorized for public display.
+- Read public announcements.
+- Learn how to create a league identity.
+- Sign in or create an account when ready.
+
+Visitors cannot register for a season, check in, submit a result as a participant, or access private account information.
+
+### 3.2 Authenticated gamer
+
+An authenticated gamer is a signed-in account holder. Authentication alone does not guarantee competition eligibility.
+
+Gamers can use all permitted public features and, where applicable:
+
+- Create or complete their league identity.
+- Manage their own profile.
+- Register for eligible seasons and divisions.
+- View their registrations and registration status.
+- View their personal competition schedule.
+- Access participant-specific check-in actions.
+- Access their own competition history and statistics.
+- Receive personal notifications.
+- Access other permitted player features.
+
+Competition actions must be authorized by the backend. A gamer cannot access another gamer's private data by changing a URL or identifier.
+
+### 3.3 Administrator and authorized operator
+
+Administrators and operators continue to use the dedicated admin workspace. Their authority depends on their existing roles, permissions, and scope.
+
+Administrative capabilities are not granted merely because a user has signed in.
+
+Public and gamer pages must not expose administrative actions, internal operational records, or private participant data.
+
+### 3.4 Access matrix
+
+| Feature | Visitor | Signed-in gamer | Authorized admin/operator |
+|---|---|---|---|
+| Public homepage | Yes | Yes | Yes |
+| Browse leagues and seasons | Yes | Yes | Yes |
+| View public phases and schedules | Yes | Yes | Yes |
+| View published results | Yes | Yes | Yes |
+| View public player profiles | Yes | Yes | Yes |
+| Create/edit own league identity | No / sign-in prompt | Yes, within permitted fields | Only through separately authorized workflows |
+| Register for a season | No / sign-in prompt | If eligible | Only if an explicitly authorized administrative workflow exists |
+| Personal competition dashboard | No | Yes | Not a substitute for admin workspace |
+| Check in as a participant | No | If eligible and within the allowed window | Only if a separate, explicitly authorized operation exists |
+| Manage season configuration | No | No | According to permissions |
+| Manage schedules and results | No | No | According to permissions |
+| Access private account data | No | Own data only | According to explicit permissions |
+
+---
+
+## 4. Navigation and information architecture
+
+### 4.1 Primary navigation
+
+The default entry point is the public website. A visitor does not land on a login page or player dashboard.
+
+Primary navigation:
+
+1. **Home**
+2. **Competitions**
+3. **Career**
+4. **My League Identity**
+5. **Notifications** — available to authenticated users
+6. **Sign in**
+7. **Create League Identity**
+
+After sign-in, the navigation adapts to the user's access level. Signed-in gamers receive their personal options, and authorized administrators retain access to their dedicated admin workspace.
+
+The navigation should remain concise. Personal options can be grouped in a profile menu on desktop or a compact menu on mobile.
+
+### 4.2 Route map
+
+The following routes are the proposed public information architecture. Before implementation, map them to the existing Next.js routing conventions and reuse compatible existing routes where practical. Do not create duplicate pages solely to match these exact route names.
+
+| Route | Purpose | Access |
+|---|---|---|
+| `/` | Public homepage | Public |
+| `/competitions` | Discover leagues and seasons | Public |
+| `/leagues/[leagueId]` | Public league overview | Public |
+| `/seasons/[seasonId]` | Public season overview | Public |
+| `/seasons/[seasonId]/phases` | Season phases and progress | Public |
+| `/seasons/[seasonId]/schedule` | Public series schedule | Public |
+| `/seasons/[seasonId]/results` | Published results | Public |
+| `/series/[seriesId]` | Public series details and game outcomes | Public, subject to publication rules |
+| `/players/[playerId]` | Public player profile | Public, with privacy controls |
+| `/career` | Career discovery or sign-in prompt | Public entry point |
+| `/career/me` | Personal career history | Authenticated gamer |
+| `/player/dashboard` | Gamer home and personal next actions | Authenticated gamer |
+| `/player/competitions` | My Competitions and registrations | Authenticated gamer |
+| `/player/profile` | Manage own league identity | Authenticated gamer |
+| `/player/notifications` | Personal notifications | Authenticated gamer |
+| Existing authentication routes | Registration, sign-in, email verification | Appropriate authentication state |
+| Existing admin routes | Administrative operations | Authorized admin/operator |
+
+Route names are a proposed information architecture, not a claim that every route already exists. The implementation must first inspect the current app routes and preserve working authentication and admin flows.
+
+---
+
+## 5. Page specifications
+
+### 5.1 Home
+
+**Purpose:** Introduce NexGen League and make current competition activity immediately visible.
+
+Required sections:
+
+- League identity and short description.
+- Featured or recently active leagues.
+- Active and upcoming seasons.
+- Ongoing competition phases where available.
+- Upcoming series and their scheduled times.
+- Recently completed series and published results.
+- Clear links to discover competitions.
+- A call to action for gamers to create their league identity.
+- Public announcements when supported.
+
+Requirements:
+
+- Do not fabricate statistics, participants, schedules, or results.
+- If there are no active competitions, show a useful empty state with links to upcoming seasons or league discovery.
+- The page must be useful before any user signs in.
+- A signed-in gamer may receive a personalized section, but the public overview must remain available.
+- Highlights are optional and deferred from the initial MVP.
+
+### 5.2 Competitions discovery
+
+**Purpose:** Allow visitors to find leagues and seasons.
+
+Required capabilities:
+
+- List publicly visible leagues.
+- Show seasons belonging to a league.
+- Identify season status, dates, and available public information.
+- Link to the relevant league or season page.
+- Distinguish registration-open, upcoming, active, completed, and other supported lifecycle states.
+- Provide useful empty, loading, and error states.
+
+Filtering and search can be added where supported by the current data and backend. Do not create a separate season model for public discovery.
+
+A season being closed to registration does not automatically mean its public information should disappear. Public visibility and registration eligibility are separate concepts.
+
+### 5.3 Public league page
+
+**Purpose:** Explain what a league is and provide access to its seasons.
+
+Show, where available:
+
+- League name and description.
+- Public branding and logo.
+- Public league status.
+- Its publicly visible seasons.
+- Links to relevant season pages.
+- Public announcements or league information where supported.
+
+Do not expose private organizer details, internal configuration, or administrative controls.
+
+### 5.4 Public season overview
+
+**Purpose:** Give visitors a complete, understandable picture of a season.
+
+Display, where available:
+
+- Season name and status.
+- Start and end dates.
+- Competition timezone.
+- Published season rules.
+- Registration status and permitted registration information.
+- Divisions and their public status.
+- Participant information permitted for public display.
+- Competition phases and progress.
+- Upcoming series.
+- Completed series and published results.
+- Links to schedule, phases, results, and participant profiles.
+
+The season page must be able to represent different lifecycle stages. It must not assume every season is currently accepting registrations or already has scheduled series.
+
+For `NGL 2026 Season 1`, the public page should use the actual state and data returned by the backend. Its registration-open state must be reflected accurately if it remains open.
+
+### 5.5 Phases and competition progress
+
+**Purpose:** Let spectators understand where a season stands.
+
+Display:
+
+- Existing phases.
+- Phase names and status.
+- The relationship between phases.
+- Public progression or advancement information where the backend records it.
+- Associated series.
+- Completed and upcoming activity.
+
+A season with no phases should show an informative pre-competition state. It must not invent phases simply to fill the page.
+
+The page should distinguish between:
+
+- Not yet created.
+- Scheduled or upcoming.
+- In progress.
+- Completed.
+- Other statuses explicitly supported by the backend.
+
+The final status labels must be mapped from the actual domain state machine.
+
+### 5.6 Public schedule
+
+**Purpose:** Allow anyone to follow upcoming and completed series.
+
+Each publicly visible schedule entry should show, where available:
+
+- Series identifier or public reference.
+- Participants.
+- Date and time.
+- Competition timezone.
+- Phase and season.
+- Series status.
+- Public result when available.
+- Link to series details.
+
+Requirements:
+
+- Use the season's configured timezone when presenting competition times.
+- Avoid silently displaying a server timezone or assuming UTC is the viewer's local timezone.
+- Clearly label times where timezone confusion is possible.
+- Do not expose internal scheduling metadata.
+- Do not imply that a series is scheduled when no schedule exists.
+- Support empty schedules before fixtures have been generated.
+- Respect the actual backend schedule and lifecycle rules.
+
+### 5.7 Public series details
+
+**Purpose:** Explain a series and its outcome.
+
+The current competition model defines a series containing three games. The public interface must represent the actual games and outcomes recorded for that series.
+
+Display, where available:
+
+- Participants.
+- Season, division, and phase context.
+- Scheduled time and status.
+- The individual games in the series.
+- Game outcomes.
+- Final series result.
+- Published advancement outcome.
+- Public result history or related series when supported.
+
+If a game is a draw, the interface must reflect the competition rules and the backend's recorded outcome. It must not independently calculate or invent advancement.
+
+Do not display participant-only check-in controls to visitors.
+
+### 5.8 Results
+
+**Purpose:** Make completed competition outcomes accessible and transparent.
+
+Display only results permitted for public release by the existing result lifecycle and authorization rules.
+
+Where available, show:
+
+- Completed series.
+- Individual game results.
+- Participants.
+- Completion time.
+- Phase context.
+- Final series outcome.
+- Advancement outcome.
+- Links to series details and player profiles.
+
+Pending, disputed, unconfirmed, or otherwise restricted results must follow the actual backend publication rules. The frontend must not treat every submitted result as automatically verified and public.
+
+If no public results exist, show an informative empty state.
+
+### 5.9 Public player profile
+
+**Purpose:** Let people discover participating gamers and review their public competitive records.
+
+Display only permitted public profile fields, such as:
+
+- Public gamer name and identity.
+- Public avatar or profile image, if supported.
+- Public competition history.
+- Published results.
+- Available career statistics.
+- Relevant public achievements, when supported.
+
+Do not expose email addresses, authentication details, private contact information, internal verification data, or other private fields.
+
+A public profile must not imply that the player has achieved a classification, ranking, or verification status that the authoritative system has not assigned.
+
+### 5.10 My League Identity
+
+**Purpose:** Let gamers establish and maintain their competitive identity.
+
+The public entry point explains the benefit of creating a league identity and leads visitors through the existing account registration and verification flow.
+
+For authenticated gamers, support the existing profile capabilities:
+
+- View and edit permitted profile fields.
+- See account and email-verification state.
+- Understand which requirements remain before participating.
+- Navigate to competitions and registrations.
+
+Identity creation, account verification, reputation, competitive classification, and season eligibility are distinct concepts. Do not use a future classification system as a Season 1 registration requirement.
+
+The page must reuse existing identity and profile services rather than introduce a second player identity model.
+
+### 5.11 Gamer dashboard
+
+**Purpose:** Give signed-in gamers a useful overview of their own activities.
+
+Required sections:
+
+- Profile completion or verification actions where applicable.
+- Available seasons for registration.
+- My registrations.
+- Registration status.
+- Upcoming personal series.
+- Check-in actions when permitted.
+- Recent personal results.
+- Relevant notifications.
+- Links to career history and profile settings.
+
+Every section must use real backend data.
+
+An empty dashboard must explain what the gamer can do next. It must not show misleading mock participants, invented schedules, or fabricated statistics.
+
+The public discovery pages must remain available independently of this dashboard.
+
+### 5.12 My Competitions
+
+**Purpose:** Manage a gamer's own season participation.
+
+Required capabilities:
+
+- Discover eligible seasons.
+- Open a season's details and rules.
+- Choose an eligible division where the season requires it.
+- Submit a registration request.
+- Display the authoritative registration result.
+- List the gamer's existing registrations and their states.
+- Link to the relevant season workspace.
+- Display personal schedule and check-in actions when the competition reaches the appropriate stage.
+
+Registration is not successful merely because a button was clicked. The UI must wait for the backend response and display the actual outcome.
+
+The frontend must handle duplicate registration attempts, a season closing during the request, a full division, missing eligibility requirements, and other rejected requests gracefully.
+
+### 5.13 Career
+
+**Purpose:** Build a record of a gamer's competitive journey.
+
+The public entry point can introduce the career feature and link to public player profiles.
+
+For signed-in gamers, the personal career view should use verified or otherwise authoritative competition records to show available information, including:
+
+- Past and current competitions.
+- Published match and series history.
+- Available statistics.
+- Recorded outcomes.
+- Achievements or advancement records when supported.
+
+Do not invent a career score, ranking, achievement system, or statistics formula that is not defined by the product and backend.
+
+### 5.14 Notifications
+
+**Purpose:** Inform gamers about events affecting their participation.
+
+Potential notification categories include:
+
+- Registration confirmation or rejection.
+- Season or schedule changes.
+- Upcoming check-in windows.
+- Series status changes.
+- Published results.
+- Other competition updates supported by the system.
+
+Use existing notification infrastructure where it exists. If a category is not implemented, identify it as a gap rather than simulating delivery.
+
+Public announcements belong on public pages; private or personal notifications require authentication.
+
+### 5.15 Authentication and verification
+
+Reuse the existing registration, sign-in, email verification, session, and logout flows.
+
+Requirements:
+
+- Preserve the existing authentication routes and session behavior.
+- Send signed-out users to the appropriate authentication flow when they attempt a protected action.
+- Return them to the intended action after successful sign-in where safe and supported.
+- Do not reveal private account information through public routes.
+- Respect the backend requirement that an account be active and email-verified before login or participation, as applicable to the current authentication implementation.
+- Provide understandable verification and resend states using the existing mail infrastructure.
+
+Development-only email tools must not be exposed as production features.
+
+---
+
+## 6. Core user journeys
+
+### 6.1 Visitor follows a season
+
+1. Visitor opens the homepage.
+2. Visitor selects Competitions.
+3. Visitor discovers a league.
+4. Visitor opens a season.
+5. Visitor reviews the season status and rules.
+6. Visitor opens Phases to understand competition progress.
+7. Visitor opens the Schedule to inspect upcoming series.
+8. Visitor opens a series to view details and, when available, its games and outcomes.
+9. Visitor opens Results to review completed competition activity.
+10. Visitor can return later without creating an account.
+
+**Acceptance outcome:** The entire read-only journey works without authentication, provided the requested information is public and exists.
+
+### 6.2 Visitor becomes a gamer
+
+1. Visitor selects Create League Identity.
+2. Visitor completes the existing account registration flow.
+3. Visitor verifies their email using the supported verification process.
+4. Visitor signs in.
+5. Gamer completes or reviews their league profile.
+6. Gamer opens Competitions.
+7. Gamer discovers an eligible season.
+8. Gamer reviews its published rules.
+9. Gamer selects an eligible division if required.
+10. Gamer submits registration.
+11. The system returns an authoritative registration outcome.
+12. Gamer sees the registration under My Competitions.
+
+**Acceptance outcome:** A new gamer can progress from the public website to a real season registration without duplicate identities or disconnected frontend state.
+
+### 6.3 Returning gamer follows a competition
+
+1. Gamer signs in.
+2. Gamer lands on the gamer dashboard or another appropriate destination.
+3. Gamer sees their registrations and personal next actions.
+4. Gamer opens My Competitions.
+5. Gamer selects a season.
+6. Gamer reviews their schedule.
+7. When permitted, gamer uses the check-in action.
+8. Gamer follows series details and published results.
+9. Personal career history reflects authoritative competition records when available.
+
+**Acceptance outcome:** Personal actions are shown only when permitted by the backend state and authorization rules.
+
+### 6.4 Administrator publishes competition activity
+
+1. Authorized administrator creates or manages a league and season.
+2. Administrator configures the season using the existing admin workspace.
+3. Administrator publishes the appropriate season rules and opens registration.
+4. Public discovery reflects the season's public state.
+5. Gamers register through the connected gamer experience.
+6. Administrative participant views reflect the registrations.
+7. After the competition workflow produces schedule and result data, public pages reflect the authorized information.
+8. The same authoritative data remains available to other approved clients in the future.
+
+**Acceptance outcome:** The public website, gamer experience, and admin workspace remain consistent because they share the same backend records.
+
+---
+
+## 7. Backend integration and data ownership
+
+### 7.1 Single source of truth
+
+The existing League Platform backend remains authoritative for:
+
+- Accounts, sessions, and authorization.
+- Player identity and profiles.
+- Leagues, seasons, and divisions.
+- Season lifecycle and registration availability.
+- Published season rules.
+- Participant registrations.
+- Competition phases and progression.
+- Plots, series, and games, according to the existing competition model.
+- Scheduling and check-in state.
+- Results, confirmation, and publication eligibility.
+- Career records derived from authoritative competition activity.
+- Notifications, where implemented.
+
+The frontend may format and present this data but must not create an alternative source of truth.
+
+### 7.2 Existing backend reuse
+
+Before creating or changing any endpoint, inspect the current API controllers, services, DTOs, authorization guards, Prisma schema, and tests.
+
+The implementation should:
+
+1. Reuse existing API endpoints when they satisfy the requirement.
+2. Extend existing services and contracts where functionality is genuinely missing.
+3. Avoid creating duplicate player, season, participant, series, or result models.
+4. Preserve established state transitions and business rules.
+5. Add tests for any new or modified backend behavior.
+6. Document verified API contracts in the development documentation.
+
+One known existing registration route is:
+
+`POST /api/v1/seasons/:seasonId/divisions/:divisionId/participants`
+
+This route has been used for season/division participation and includes checks relating to registration status, season/division relationship, active division, player eligibility, self-registration, and capacity. Its current implementation and request/response contract must be verified before frontend integration.
+
+This specification does not assume that other proposed public pages already have dedicated endpoints. Their data requirements must be mapped to verified existing contracts.
+
+### 7.3 Public read access
+
+Public read endpoints or appropriately authorized existing endpoints must expose only fields approved for public display.
+
+The implementation must distinguish:
+
+- Publicly visible data.
+- Authenticated user's own data.
+- Participant-only operations.
+- Administrative operations.
+- Private/internal operational data.
+
+If a public endpoint is missing, implement the smallest appropriate extension within the existing architecture. Do not make an administrative endpoint public simply to avoid building a public read contract.
+
+### 7.4 Registration integration
+
+The registration workflow must use the existing participation service and enforce authoritative backend rules.
+
+The UI must account for:
+
+- Account and email-verification state.
+- Season registration status.
+- Division status and season relationship.
+- Registration capacity.
+- Existing registration state.
+- Duplicate submissions.
+- Season or division state changes while a request is in progress.
+- Any actual eligibility rules defined for the season.
+
+The frontend must not independently decide that a gamer is eligible merely because a season appears on the discovery page.
+
+### 7.5 Competition lifecycle integration
+
+The public interface must map the existing competition lifecycle to readable pages and status labels.
+
+The established conceptual flow is:
+
+Season → Phase → Plot → Series → Game → Result → Advancement.
+
+The frontend must represent the actual persisted state. It must not invent missing phases, generate schedules locally, calculate independent results, or advance participants independently of the backend.
+
+### 7.6 Time and schedule handling
+
+- Respect the configured season competition timezone.
+- Use backend schedule values as authoritative.
+- Label dates and times clearly.
+- Keep the series scheduling window and check-in rules defined by the current competition system.
+- Do not independently change scheduling or check-in windows in the frontend.
+- Ensure date formatting does not accidentally shift a competition into the wrong calendar day.
+
+### 7.7 Shared future clients
+
+The public website and future ArenaX app must consume the same authoritative League Platform services and competition data.
+
+For this specification, ArenaX is an architectural consideration only. Its separate navigation, application workflows, product features, and implementation are deferred.
+
+No ArenaX-specific models, endpoints, or frontend work should be added unless separately approved.
+
+---
+
+## 8. Permissions and security requirements
+
+1. Public routes must not require authentication for authorized public information.
+2. Public routes must not return private account data or internal administrative information.
+3. Authentication must be enforced by the backend, not just by hiding frontend controls.
+4. Gamers may modify only their own permitted profile and participation records.
+5. Administrative operations must retain existing role, permission, ownership, and scope checks.
+6. Public results must respect the existing result confirmation and publication lifecycle.
+7. Season registration must be validated by the backend on every request.
+8. The frontend must handle unauthorized and forbidden responses without exposing sensitive details.
+9. Private routes must not rely on a hidden link as their only security boundary.
+10. Public player profiles must expose only explicitly permitted fields.
+11. User-generated text and media must follow the platform's existing validation and security requirements.
+12. Session, cookie, and token handling must remain compatible with the current authentication architecture.
+
+---
+
+## 9. User experience and reliability requirements
+
+### 9.1 Loading states
+
+Pages that retrieve data must show a clear loading state rather than briefly presenting misleading empty content.
+
+### 9.2 Empty states
+
+Examples include:
+
+- No public leagues available.
+- No seasons available.
+- Registration not yet open.
+- No phases created.
+- No schedule generated.
+- No published results.
+- No registrations for the signed-in gamer.
+- No career records yet.
+
+Empty states must explain the current situation and offer a relevant next action where appropriate.
+
+### 9.3 Error states
+
+- Show a clear message when a request fails.
+- Offer retry where appropriate.
+- Do not silently convert API errors into an empty successful response.
+- Do not display stale or mock competition data as if it were current.
+- Do not require users to refresh the page as a normal part of successful operation.
+- Preserve form input when a recoverable registration or profile request fails, where safe.
+
+### 9.4 Responsive and accessible design
+
+- Support desktop, tablet, and mobile layouts.
+- Keep public navigation usable on small screens.
+- Use clear headings, labels, and status descriptions.
+- Ensure controls are keyboard-accessible.
+- Provide accessible text for meaningful images and icons.
+- Do not rely on color alone to communicate competition status.
+- Keep schedule and result information readable at narrow widths.
+
+### 9.5 Visual direction
+
+The website should remain professional, simple, and recognizable as NexGen League.
+
+Avoid unnecessary visual clutter, generic gaming-site layouts, and decorative features that distract from competition information.
+
+Public competition information and navigation should take priority over promotional content.
+
+---
+
+## 10. Implementation phases and dependencies
+
+### Phase 1 — Audit and route mapping
+
+- Inspect existing frontend routes and layouts.
+- Identify current public, player, and admin pages.
+- Trace the season discovery request from the player dashboard to the backend response.
+- Verify why the registration-open `NGL 2026 Season 1` has previously failed to appear in player discovery.
+- Inspect the existing season, participation, rules, competition, results, and authentication contracts.
+- Record which page capabilities already exist, which are partial, and which are missing.
+- Produce a route-to-page and page-to-API mapping before major implementation.
+
+**Exit criteria:** The discovery failure is explained by evidence, and the implementation plan maps to the existing architecture.
+
+### Phase 2 — Public entry point and discovery
+
+- Establish the public homepage as the default entry point.
+- Implement or refine public navigation.
+- Implement league and season discovery using real backend data.
+- Implement the public league and season overview pages.
+- Handle public visibility and lifecycle states correctly.
+
+**Exit criteria:** A signed-out visitor can discover and open a publicly visible season.
+
+### Phase 3 — Public competition workspace
+
+- Implement phase and competition progress views.
+- Implement the public schedule.
+- Implement series detail pages.
+- Implement results pages.
+- Display public participant information where authorized.
+- Ensure empty schedules and incomplete competition states are handled correctly.
+
+**Exit criteria:** Visitors can follow real competition activity without an account.
+
+### Phase 4 — League identity and registration
+
+- Connect the public entry point to existing account registration and verification.
+- Connect the gamer profile to existing identity services.
+- Integrate season/division registration with the existing participation API.
+- Implement My Competitions and authoritative registration states.
+- Verify that registrations appear in the admin participant view.
+
+**Exit criteria:** A verified gamer can register for an eligible season and see the authoritative registration state.
+
+### Phase 5 — Personal competition experience
+
+- Connect personal schedules.
+- Implement participant check-in controls when supported by the competition state.
+- Connect career history to authoritative results.
+- Connect notifications where infrastructure exists.
+- Add clear loading, empty, error, and permission states.
+
+**Exit criteria:** A registered gamer can follow their personal competition journey using real data.
+
+### Phase 6 — End-to-end verification
+
+- Verify public access without an account.
+- Verify authentication and verification flows.
+- Verify registration and admin consistency.
+- Verify schedule and result visibility.
+- Verify access controls.
+- Test with multiple distinct gamer accounts.
+- Run the full competition lifecycle only after the player-facing flows work reliably.
+
+**Exit criteria:** Public, gamer, and admin views agree on the authoritative backend state.
+
+---
+
+## 11. Acceptance tests
+
+The following are release acceptance requirements. Tests must use actual backend data and appropriate test accounts, not fabricated frontend fixtures.
+
+### A. Public access
+
+- [ ] A signed-out visitor can open the homepage.
+- [ ] A signed-out visitor can browse publicly visible leagues and seasons.
+- [ ] A signed-out visitor can open a public season and view its available information.
+- [ ] A visitor can access public phases, schedules, series details, and published results where data exists.
+- [ ] Public pages do not redirect visitors to sign-in merely to read public competition information.
+- [ ] Public pages do not expose private account information or administrative controls.
+- [ ] Pages provide useful loading, empty, and error states.
+
+### B. Season discovery
+
+- [ ] A season marked as publicly visible and open for registration appears in the appropriate discovery view.
+- [ ] The existing `NGL 2026 Season 1` appears when its actual backend state satisfies the public discovery criteria.
+- [ ] If the season is missing, the underlying API request and response can be traced and the cause identified.
+- [ ] A season closed to registration remains publicly discoverable when its public visibility policy permits it.
+- [ ] Season details and published rules correspond to the selected season.
+- [ ] No duplicate or hardcoded season data is used to make discovery appear functional.
+
+### C. Registration and identity
+
+- [ ] A visitor attempting to register is directed through the appropriate authentication flow.
+- [ ] A verified, eligible gamer can register for an open season and eligible division.
+- [ ] A successful registration appears in My Competitions.
+- [ ] The registration appears in the authoritative admin participant view.
+- [ ] Duplicate registration attempts are handled according to the backend rules.
+- [ ] Closed registration, full capacity, invalid division, and failed eligibility checks produce understandable outcomes.
+- [ ] A failed request is never presented as a successful registration.
+- [ ] Gamers cannot edit another gamer's profile or registration by changing a URL or request identifier.
+
+### D. Competition progress and schedules
+
+- [ ] Public phases match the backend state.
+- [ ] Public schedules match the backend schedule and timezone.
+- [ ] An empty schedule is presented accurately when fixtures do not exist.
+- [ ] Public series details show the recorded games and outcomes.
+- [ ] Result and advancement information matches authoritative backend data.
+- [ ] Unconfirmed, disputed, or unpublished results respect existing publication rules.
+- [ ] The frontend does not independently create fixtures or determine competition advancement.
+
+### E. Gamer dashboard and career
+
+- [ ] A signed-in gamer can view their own registrations.
+- [ ] A gamer sees personal schedule and check-in actions only when appropriate.
+- [ ] The dashboard does not require a refresh to load normal profile data.
+- [ ] Career records reflect authoritative competition records.
+- [ ] Empty career history is handled without fake statistics or achievements.
+- [ ] Personal notifications are not exposed to other users.
+
+### F. Administration and shared data
+
+- [ ] Existing admin routes and permissions continue to work.
+- [ ] Public website changes do not bypass administrative authorization.
+- [ ] Admin-created public data appears on the public website according to visibility rules.
+- [ ] Gamer registrations update the same underlying records used by the admin workspace.
+- [ ] Schedule and result updates appear in public views after the authoritative data changes.
+- [ ] No parallel public-only season, participant, series, or result models are introduced.
+
+### G. Engineering quality
+
+- [ ] API and web builds pass.
+- [ ] Relevant automated tests pass.
+- [ ] New and modified backend behavior has appropriate tests.
+- [ ] Public and protected routes have appropriate authorization tests.
+- [ ] Critical pages are tested at desktop and mobile sizes.
+- [ ] No critical feature depends on mock data.
+- [ ] No new ArenaX implementation is included in this scope.
+
+---
+
+## 12. Definition of done
+
+The Public & Player Website MVP is complete when:
+
+1. The public homepage is the default entry point.
+2. Visitors can discover leagues and seasons without signing in.
+3. Visitors can follow available phases, schedules, series, and published results.
+4. The existing open season is discoverable through the real backend.
+5. Gamers can create and manage their league identity through existing identity services.
+6. Eligible gamers can register for a season and see their registration reflected consistently.
+7. Personal dashboard and career features use authoritative data.
+8. Administrative operations remain separate and properly authorized.
+9. Public and gamer views do not introduce competing sources of truth.
+10. The critical acceptance tests pass.
+11. Known incomplete capabilities are documented rather than simulated.
+12. The architecture remains suitable for a future ArenaX client using the same backend.
+
+---
+
+## 13. Governance and change control
+
+This document is the canonical product specification for the public and gamer-facing League website.
+
+Implementation tickets must trace back to requirements in this document. Technical decisions and API contracts should be recorded in the development documentation and must not silently redefine product behavior.
+
+If an implementation limitation or existing backend contract conflicts with a requirement:
+
+1. Identify the discrepancy.
+2. Verify the existing behavior in source code and tests.
+3. Explain the impact.
+4. Propose the smallest compatible change.
+5. Update this specification if the approved product behavior changes.
+6. Update relevant tests and implementation records.
+
+Do not resolve ambiguity by inventing new business rules or creating duplicate models.
+
+### Explicit exclusions
+
+The following are not part of this specification's MVP scope:
+
+- Building the ArenaX app.
+- Creating a second competition backend.
+- Duplicating identity, season, registration, series, or result models.
+- Public highlights or a full media platform.
+- Invented rankings, statistics, or achievements.
+- Replacing the current admin workspace.
+- Rebuilding working authentication or competition services without a demonstrated need.
+
+---
+
+## 14. Immediate next action
+
+Before implementation tickets are created, perform a focused audit of the current repository and produce an implementation mapping with these columns:
+
+| Requirement | Existing route/component | Existing API/service | Current status | Gap or defect | Next action |
+|---|---|---|---|---|---|
+| Public homepage | Verify in repository | Verify | To audit | To audit | Map existing work |
+| League discovery | Verify in repository | Verify | To audit | To audit | Map existing work |
+| Season discovery | Player dashboard and relevant routes | Verify actual request and response | Known issue: open season not appearing | Root cause must be evidenced | Trace and fix |
+| Public season page | Existing season routes/workspace | Verify | To audit | To audit | Separate public view from admin operations |
+| Phases and schedule | Verify in repository | Verify | To audit | To audit | Map lifecycle data |
+| Series and results | Verify in repository | Verify | To audit | To audit | Map public result rules |
+| Identity and registration | Existing authentication/profile/participation code | Verify | Partially implemented | Confirm end-to-end integration | Reuse existing services |
+| Gamer dashboard | Existing player dashboard | Verify | Partially implemented | Replace incomplete or mocked data | Integrate real contracts |
+| Career and notifications | Verify in repository | Verify | To audit | To audit | Reuse existing capabilities |
+
+Do not begin by rewriting the entire frontend. Audit the current implementation, preserve working behavior, resolve the season discovery defect, and then implement the missing public-facing experience in the phases above.
