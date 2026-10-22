@@ -1,0 +1,224 @@
+NGL Odd-Field and Plot-Allocation Policy — Final Decision
+
+Status: Policy locked for implementation planning. Coding must not resume until this policy is incorporated into the competition rules and the implementation plan is checked against it.
+
+This policy consolidates the decisions confirmed for NGL's progressive competition model. It distinguishes locked requirements from implementation assumptions that still need verification. The special five-player mini-group is an explicit exception to the normal Series format.
+
+## 1. Governing principles
+
+1. No player is eliminated merely because the registration field is odd. Elimination must follow competition results, the defined ranking rules, or another explicitly approved competition rule.
+2. The competition remains progressive. Do not replace the format with an all-pairs, full round-robin system.
+3. No automatic byes. Odd-field handling must use the defined mini-group or small-field rules rather than silently advancing a player.
+4. No silent player loss. Allocation and scheduling must account for every eligible player. If a valid allocation or progression cannot be produced, stop and report the problem.
+5. Deterministic outcomes. Given the same participants, results, ruleset version, and seed order, the system must produce the same allocation and ranking.
+
+## 2. Odd-field handling
+
+### 2.1 Five or more players: reserve five for a mini-group
+
+For an odd eligible field \\(N \geq 5\\):
+
+- Reserve exactly five players for a dedicated mini-group.
+- Put the remaining \\(N-5\\) players into the normal competition field.
+- Since an odd number minus five is even, the normal field can be allocated into even-sized plots when feasible.
+- The mini-group operates separately from the normal competition field and follows the rules below.
+
+| Total eligible players | Normal field | Mini-group | Total |
+| ---------------------- | ------------ | ---------- | ----- |
+| 5                      | 0            | 5          | 5     |
+| 25                     | 20           | 5          | 25    |
+| 41                     | 36           | 5          | 41    |
+| 571                    | 566          | 5          | 571   |
+
+These examples illustrate the policy; they do not establish a strict 20-player maximum per plot.
+
+### 2.2 Mini-group format
+
+The five-player mini-group plays a single round robin of individual games:
+
+- Every player plays each of the other four players once.
+- Each pairing produces exactly one game, not a normal three-game Series.
+- There are exactly 10 games in total.
+- Each player plays four games.
+- The mini-group is complete only when all ten games have final, accepted results.
+
+This is a special competition format. It must not inherit the normal Series' best-of-three requirement or its draw-elimination rule.
+
+### 2.3 Mini-group draws and ranking
+
+A draw in a mini-group game:
+
+- Counts as neither a win nor a loss.
+- Does not automatically eliminate either player.
+- Is handled by the ranking and tie-break rules below.
+
+The proposed ranking order is:
+
+1. Total wins, highest first.
+2. Head-to-head result or mini-table among the tied players.
+3. Overall game differential, calculated as wins minus losses; draws count as neither.
+4. Pre-existing deterministic seed order as the final fallback.
+
+Apply the criteria in sequence until the ranking is resolved. A head-to-head result may not resolve a tie involving three or more players; continue to the next criterion when necessary. Do not create extra rematches solely to break a tie.
+
+Qualification: The top four ranked mini-group players qualify for the next phase. Fifth place is eliminated by ranking, not because the field had an odd number of players.
+
+### 2.4 Combining mini-group qualifiers with normal-field advancers
+
+The system must:
+
+1. Complete the mini-group and validate all ten final results.
+2. Calculate and persist the final mini-group ranking using the applicable ruleset version.
+3. Identify the top four qualifiers.
+4. Determine the normal field's eligible advancers through its own competition rules.
+5. Combine the two sets of advancers and validate the resulting next-phase field.
+6. Only then generate or publish the next phase's schedule.
+
+The system must not inject mini-group qualifiers into a next-phase schedule that is already locked or published. If the combined field is invalid or progression is blocked, pause and flag the issue for resolution.
+
+## 3. Small fields: fewer than five players
+
+These are explicit small-field exceptions and must be handled separately from the five-player mini-group.
+
+| Eligible players | Required format or outcome                   | Advancement / terminal rule                                                                                                               |
+| ---------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 1                | No match required                            | Declare the player champion only when this is the legitimate final competition outcome. Otherwise, pause and flag unresolved progression. |
+| 2                | Normal approved Series format                | Apply the normal Series result and advancement rules. Do not invent a bye or a different format.                                          |
+| 3                | Single round robin: each pair plays one game | First and second place advance; third place is eliminated by ranking.                                                                     |
+| 4                | Normal approved competition format           | Use the applicable ruleset and normal progression rules.                                                                                  |
+
+### Three-player round robin
+
+- Each of the three pairs plays once.
+- Total: 3 individual games.
+- Each player plays two games.
+- The top two advance; third place is eliminated by ranking.
+- Use the same ranking and tie-break sequence proposed for the five-player mini-group: total wins, head-to-head result or mini-table, overall game differential, then deterministic seed order.
+
+The three-player format is also an exception to the normal three-game Series format and normal draw-elimination rule. A draw does not itself eliminate a player.
+
+### One-player terminal handling
+
+A single remaining player is not automatically a champion merely because the field has fallen to one.
+
+- Legitimate final competition outcome: the system may declare the player champion.
+- Any other phase or unresolved progression state: do not declare a champion or silently advance the player. Pause progression, record the reason, and flag the case for resolution.
+
+The implementation must distinguish a legitimate final outcome from an incomplete or invalid competition state.
+
+## 4. Even-field plot allocation
+
+For even fields, retain the existing plot-count rule:
+
+\\[ P = \min(10,\lceil N/20 \rceil) \\]
+
+Where \\(N\\) is the eligible normal-field player count and \\(P\\) is the planned number of plots.
+
+Allocation requirements:
+
+- Preserve the approved plot count when a valid allocation is possible.
+- Distribute all eligible players across the planned plots.
+- Make every plot even-sized whenever feasible.
+- When all plots are even-sized, keep the largest and smallest plot sizes no more than two players apart.
+- Never drop, duplicate, or silently reassign a player to force an allocation.
+- If the constraints cannot be satisfied, report a clear allocation error and pause progression rather than silently changing the plot count or competition rules.
+
+Examples:
+
+| Normal-field players | Planned plots | Example allocation                     |
+| -------------------- | ------------- | -------------------------------------- |
+| 34                   | 2             | 16, 18                                 |
+| 40                   | 2             | 20, 20                                 |
+| 42                   | 3             | 14, 14, 14                             |
+| 100                  | 5             | 20, 20, 20, 20, 20                     |
+| 102                  | 6             | 16, 16, 16, 18, 18, 18                 |
+| 566                  | 10            | 56, 56, 56, 56, 56, 56, 56, 56, 58, 58 |
+
+The plot-count formula is authoritative over illustrative examples. In particular, 34 players produce two plots, not three.
+
+### Odd total fields
+
+For odd fields of five or more, apply the five-player reservation first. Calculate the normal-field plot count from the remaining even field, then allocate that field under the even-field rules.
+
+For example, 571 eligible players become 566 normal-field players plus five mini-group players. The normal field uses the existing ten-plot cap. Since the target of approximately 20 players per plot is not a strict capacity limit, the implementation must not assume that a ten-plot allocation can accommodate only 200 players.
+
+## 5. Normal Series rules remain separate
+
+Unless an existing, approved ruleset explicitly says otherwise:
+
+- A normal Series consists of exactly three Games.
+- The Series winner must win at least two Games.
+- A draw under the normal Series rules follows the existing rule: both players are eliminated.
+- A mini-group draw or three-player round-robin draw does not trigger that normal Series draw-elimination rule.
+- No change to normal Series scoring, elimination, or advancement is implied by this policy.
+
+This distinction must be represented explicitly in the rules and implementation. Do not implement the mini-group as a normal Series with its game count simply changed.
+
+## 6. Implementation requirements
+
+The implementation should enforce the policy through explicit, testable competition rules rather than scattered special cases.
+
+1. Format selection: Choose the applicable format based on eligible field size and whether the competition is at its legitimate final outcome.
+2. Field partitioning: For odd fields of at least five, select five players for the mini-group and allocate the remainder to normal plots.
+3. Participant accounting: Verify that every eligible player appears exactly once in the appropriate field partition.
+4. Deterministic selection: Use a documented, stable rule for choosing the five mini-group participants. Do not rely on incidental database ordering.
+5. Scheduling: Generate the mini-group's ten pairings exactly once each, and three pairings for a three-player round robin. Prevent duplicate pairings within the relevant group.
+6. Result validation: Validate accepted results, preserve draw semantics by format, and block ranking until the relevant games are final.
+7. Ranking: Use the correct format-specific ranking rules and deterministic seed fallback.
+8. Advancement: Determine qualifiers only after results and rankings are complete. Validate the next-phase field before creating or publishing its schedule.
+9. Terminal states: Distinguish champion, eliminated, qualified, pending, and blocked/unresolved outcomes. A lone survivor must not become champion automatically outside a legitimate final outcome.
+10. Auditability: Persist the ruleset version, participant partition, pairings, final results, ranking criteria, tie-break decisions, and advancement decisions so the outcome can be explained and reproduced.
+
+## 7. Acceptance criteria for the implementation agent
+
+The policy is not ready to be considered implemented until automated tests verify at least the following:
+
+| Test case                                  | Expected result                                                            |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| 5 eligible players                         | 0 normal-field players; 5 mini-group players; 10 games                     |
+| 25 eligible players                        | 20 normal-field players; 5 mini-group players                              |
+| 41 eligible players                        | 36 normal-field players; 5 mini-group players                              |
+| 571 eligible players                       | 566 normal-field players; 5 mini-group players; normal field uses 10 plots |
+| Five-player mini-group                     | Each player plays 4 games; every pair occurs exactly once                  |
+| Three-player field                         | 3 games; top 2 advance; third is eliminated by ranking                     |
+| Mini-group draw                            | Neither player is eliminated because of the draw alone                     |
+| Mini-group tie                             | Ranking follows the specified tie-break order and seed fallback            |
+| Incomplete mini-group                      | No final mini-group ranking or advancement                                 |
+| Four-player field                          | Normal approved format is used                                             |
+| Two-player field                           | Normal approved Series format is used                                      |
+| One player at legitimate final outcome     | Champion may be declared                                                   |
+| One player before legitimate final outcome | Progression pauses and unresolved state is flagged                         |
+| 34-player even field                       | 2 plots, with an example allocation of 16 and 18                           |
+| 102-player even field                      | 6 plots, with a balanced even allocation such as 16, 16, 16, 18, 18, 18    |
+| Allocation cannot satisfy constraints      | Explicit error; no silent player loss or unapproved plot-count change      |
+| Next phase already locked or published     | No automatic insertion of new qualifiers into its schedule                 |
+| Repeat same inputs                         | Same allocation and ranking, given the same ruleset and seed order         |
+
+Include tests for invalid or missing results, duplicate pairings, tied head-to-head mini-tables, and failures during phase transition. Test the normal Series draw rule separately to ensure the mini-group exceptions do not change it.
+
+## 8. Remaining assumptions and decisions to verify
+
+The core policy above is locked. The following details should be verified or explicitly approved before the implementation agent treats them as settled requirements.
+
+A. Selecting the five mini-group participants
+
+Proposed assumption: Select five players deterministically using an approved seed-based selection rule, with the selection recorded for audit. The policy does not yet establish whether the five should be the lowest seeds, highest seeds, randomly drawn players, or players selected through another rule.
+
+B. Tie-break calculation details
+
+Proposed assumption: “Game differential” means wins minus losses, with draws contributing zero. The head-to-head mini-table method and how it handles a partially resolved tie should be specified precisely in the ruleset and tests.
+
+C. Two-player progression
+
+The normal approved Series format applies. Verify how the existing competition rules handle a draw that eliminates both players, leaving no survivor to advance.
+
+D. Plot-size constraints
+
+The current policy treats approximately 20 players per plot as a target, not a strict maximum. Confirm whether any separate hard capacity limit exists. If one does, it must be reconciled with the ten-plot cap before large fields are accepted.
+
+E. Competition lifecycle and recovery
+
+Verify how the system determines that a final competition outcome is legitimate, and how an operator resolves a blocked phase transition. Recovery must not silently override results, rankings, or a locked schedule.
+
+These are implementation clarifications, not permission to change the locked decisions. Where an existing approved rule or schema resolves a point, use it and document the reference rather than introducing a competing rule.
+
