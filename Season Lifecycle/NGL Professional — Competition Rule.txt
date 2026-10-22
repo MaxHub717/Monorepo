@@ -1,0 +1,552 @@
+# NGL Professional — Competition Rules and Season Lifecycle Policy
+**Status:** Review Draft v0.1  
+**Purpose:** Define the authoritative competition rules from registration through finals, champion declaration, and archival.  
+**Scope:** NGL Professional Season 1 and the reusable competition engine, with Season 1-specific configuration kept separate from general platform capabilities.
+
+---
+
+## 1. Governing principles
+
+1. The player is the competitive unit for NGL Professional Season 1. Club affiliation does not determine competition participation or standings.
+2. Competition uses a progressive Phase-and-Plot model, not a traditional round-robin season.
+3. A Plot groups participants for fixture generation. It is not a separate league, division, standings table, or permanent membership.
+4. A Series contains exactly three Games and is the normal competitive and scheduling unit.
+5. No player receives an automatic bye or advancement merely because the field is odd or a fixture is missing.
+6. The next stage is generated from actual, finalized outcomes—not an assumed number of survivors.
+7. Unverified submissions, unresolved disputes, incomplete Games, and pending administrative decisions cannot be treated as finalized competitive outcomes.
+8. Any intervention capable of changing eligibility, results, advancement, elimination, or the champion must be authorized and auditable.
+9. The rules published for a Season must be versioned and fixed before competition begins. Active rules cannot be silently changed after participants have relied on them.
+10. If the system cannot safely determine a valid outcome, it must stop the affected transition and report the reason rather than guess.
+
+## 2. Competition hierarchy and terminology
+
+The normal hierarchy is:
+
+**Season → Phase → Plot → Series → Games → Official Results → Series Resolution → Advancement or Elimination**
+
+A Season is the full competition lifecycle. A Phase is a stage within the Season. A Plot is a temporary grouping inside a Phase. A Series is the contest between two players. Each Game is one encounter within that Series.
+
+The system must keep registration, eligibility, competition participation, scheduling, results, standings, advancement, and elimination as separate concepts.
+
+### Phase types
+
+The competition engine must support these stage types:
+
+- **QUALIFYING:** normal progressive competition.
+- **PLAYOFF:** a terminal bracket stage such as the semifinals.
+- **FINAL:** the final Series that determines the champion.
+- **CUSTOM:** a future or explicitly configured stage that does not silently override the standard rules.
+
+Phase numbers are sequential. Phase names are presentation labels and must not be used as the sole source of competition logic.
+
+## 3. Registration and eligibility
+
+### 3.1 Account and profile requirements
+
+For Season 1, a participant must have:
+
+- A valid NexGen account.
+- A valid League Player Profile.
+- A valid Season registration.
+- Acceptance of the applicable Season rules.
+- Any account and participation conditions explicitly required by the published Season configuration.
+
+Player classification, club membership, geographic location, reputation, and mandatory identity verification are not Season 1 eligibility gates. Account status, competitive classification, identity verification, reputation, and Season performance remain separate concepts.
+
+### 3.2 Registration controls
+
+The registration system must:
+
+- Enforce the registration opening and closing times.
+- Reject duplicate registrations for the same player and Season.
+- Enforce configured capacity safely, including simultaneous registration attempts.
+- Record the registration timestamp and current registration status.
+- Prevent ordinary registration changes after roster lock.
+- Record withdrawals, disqualifications, eligibility corrections, and authorized overrides.
+- Preserve the difference between registered, eligible, selected, reserve, withdrawn, and disqualified participants.
+
+Registration does not itself grant entry into the final competition field.
+
+### 3.3 Capacity and selection
+
+The Season capacity is configurable and must not be hardcoded to eight participants.
+
+The selection method must be published before registration opens if the number of eligible registrations can exceed the available capacity. The system must not silently invent a selection method at registration close.
+
+**Recommended default:** select eligible registrations according to the published capacity policy, then retain a separately identified reserve list where the Season configuration permits one. Registration time may be used as a published selection criterion, but it must not silently replace competition seeding.
+
+### 3.4 Registration close and roster lock
+
+The process is:
+
+1. Registration closes.
+2. Eligibility and duplicate checks are completed.
+3. Capacity and selection rules are applied.
+4. The operator reviews the eligible field and any reserves.
+5. The approved roster is locked.
+6. The system records the final competition field and its seed-order basis.
+7. The competition engine may generate the first Phase.
+
+A roster must not be locked if blocking eligibility, capacity, or selection errors remain unresolved.
+
+After roster lock, ordinary withdrawals or replacements must follow the published Season rules. Any permitted exception requires an authorized actor, a reason, an audit record, and validation that the change does not invalidate already-generated competition structures.
+
+## 4. Competition field and seeding
+
+The competition field is the approved list of participants eligible to compete in the Phase.
+
+Each Phase must have an authoritative participant list and seed order before plot allocation.
+
+### Seeding rules
+
+- Preserve the approved seed order from the previous Phase where valid.
+- If no valid seed order exists, the organizer must explicitly approve one before plot allocation.
+- Registration time must not silently become the seeding method.
+- The system must record the source and approval of the seed order.
+- A participant must occur once only in a Phase's competition field.
+
+For deterministic standard pairing, players are ordered by the approved seed order within each Plot and paired consecutively: positions 1–2, 3–4, 5–6, and so on.
+
+The terminal semifinal bracket is an explicit exception to standard consecutive pairing: seed 1 plays seed 4, and seed 2 plays seed 3.
+
+## 5. Plot count and allocation
+
+For normal Phases, calculate the number of Plots from the main-field count after any required mini-group reservation:
+
+**P = min(10, ceil(N_main / 20))**
+
+Where `N_main` is the number of participants in the main field.
+
+Rules:
+
+- A Phase may contain no more than 10 Plots.
+- Approximately 20 participants per Plot is a distribution target, not a hard capacity.
+- The Plot count is recalculated from the current Phase field.
+- A later Phase is not required to have fewer Plots solely because the previous Phase had more.
+- Distribute participants as evenly as practical; Plot sizes should differ by no more than two participants and should be even wherever feasible.
+- Every main-field participant must be assigned to exactly one Plot.
+- Pairing must be deterministic and repeatable from the same approved input.
+- If allocation constraints cannot be satisfied together, generation must stop with an actionable error rather than silently breaking a rule.
+
+Plots are temporary. New Plots are generated for each new Phase from the actual eligible survivors.
+
+## 6. Standard Series rules
+
+A standard Series contains exactly three Games between the same two distinct participants.
+
+All three Games are expected to be played, even if the first two results already establish that one player has reached two wins.
+
+A Series must not be generated with missing participants, duplicate participants, or a player facing themselves.
+
+### 6.1 Official Game outcomes
+
+Each Game must have a finalized official outcome:
+
+- Player A wins.
+- Player B wins.
+- Draw.
+- An authorized forfeit or other ruling recorded as an official win/loss outcome.
+
+An incomplete Game is not an official draw. An unresolved Game cannot be used as an automatic elimination result without an authorized ruling.
+
+### 6.2 Series advancement rule — locked
+
+Count the official wins for each player after all three Games have been finalized.
+
+- If Player A has at least two wins, A advances and B is eliminated.
+- If Player B has at least two wins, B advances and A is eliminated.
+- A draw does not count as a win.
+- If neither player reaches two wins after all three Games have been finalized, both players are eliminated.
+- The order in which the wins and draws occurred does not change the rule.
+
+Examples:
+
+| Game 1 | Game 2 | Game 3 | Series outcome |
+|---|---|---|---|
+| A wins | A wins | Draw | A advances |
+| A wins | Draw | A wins | A advances |
+| Draw | A wins | A wins | A advances |
+| A wins | B wins | Draw | Both eliminated |
+| Draw | A wins | B wins | Both eliminated |
+| Draw | Draw | Draw | Both eliminated |
+
+The system must not resolve advancement merely because a draw has occurred in an individual Game. It must evaluate the completed three-Game Series.
+
+### 6.3 Incomplete and disputed Series
+
+If any required Game is incomplete, its result is unverified, or a relevant dispute remains unresolved, the Series must not be finalized.
+
+An unresolved or incomplete result is not automatically converted into a draw. An authorized decision must establish the official outcome before Series resolution.
+
+A finalized Series resolution must record:
+
+- The three official Game outcomes.
+- Each player's win count and the number of draws.
+- The advancement or elimination outcome.
+- The resolution timestamp.
+- The applicable ruleset version.
+- The source results and any authorized ruling.
+- The actor or system process responsible for finalization.
+
+A resolution must be idempotent: retrying the same finalized operation must not create duplicate advancement records or change the outcome.
+
+## 7. Odd fields and the five-player mini-group
+
+### 7.1 Odd fields of five or more
+
+If a Phase begins with an odd eligible field of at least five participants, reserve exactly five participants for a mini-group before allocating the main field.
+
+The five selected participants are the five lowest-ranked seeds according to the approved seed order. The seed-order basis must be recorded. If no valid order exists, the organizer must approve the order before generation.
+
+The remaining main field is even and can be paired using the standard Series format.
+
+### 7.2 Mini-group format
+
+The five-player mini-group uses a single round robin of individual Games:
+
+- Ten total matchups.
+- Four Games per participant.
+- Each matchup is one Game, not a standard three-Game Series.
+- The top four participants qualify for the next Phase.
+- The fifth-ranked participant is eliminated.
+
+Mini-group results must be finalized before the ranking is locked.
+
+### 7.3 Mini-group tie-breakers
+
+Apply in this order:
+
+1. Total wins.
+2. Head-to-head result; for three or more tied participants, use the mini-table among those tied participants.
+3. Match differential: wins minus losses. Draws count as neither wins nor losses.
+4. The pre-approved seed order.
+
+No extra tie-breaker Game is generated automatically.
+
+An official forfeit counts as a win for the awarded participant and a loss for the forfeiting participant. A voided Game counts as neither a win nor a loss and is replaced only where the rules permit. An unresolved Game leaves the affected ranking provisional.
+
+### 7.4 Combining advancement pools
+
+After the mini-group and main-field Series are finalized:
+
+- Add the four mini-group qualifiers to the main-field Series winners.
+- Exclude eliminated participants.
+- Validate the resulting participant list for uniqueness and eligibility.
+- Generate the next Phase from that actual list.
+
+The five-player mini-group must not be treated as five normal Series participants, and its four qualifiers must not be inserted into an already locked or published schedule.
+
+## 8. Small-field rules
+
+Small fields require explicit formats so the system does not invent byes or generate invalid pairings.
+
+### Zero participants
+
+No Series, champion, or automatic advancement may be generated. The Season must be blocked or closed under an authorized no-contest decision.
+
+### One participant
+
+A single registration is not sufficient to declare a champion automatically. The system must report the insufficient field and require an authorized decision under the published Season rules.
+
+### Two participants
+
+Generate one standard three-Game Series. If this is the designated Final stage and it produces a valid advancing player, that player is the champion. If it is not a Final stage, do not assume the player is champion merely because only one participant survives.
+
+### Three participants
+
+Use a single round robin of three individual Games. Rank the participants using the mini-group tie-breakers. The top two qualify for the Final; the third is eliminated.
+
+### Four participants
+
+Generate a semifinal stage with two three-Game Series:
+
+- Semifinal 1: seed 1 vs seed 4.
+- Semifinal 2: seed 2 vs seed 3.
+
+The two semifinal winners advance to the Final. The semifinal losers are eliminated. A placement or consolation match is not generated unless the Season explicitly configures one.
+
+### Five or more participants
+
+Apply the odd-field mini-group rule where the field is odd; otherwise use the standard plot-and-Series format, subject to any terminal-stage rule triggered by the actual remaining field.
+
+## 9. Phase progression and stage alignment
+
+A Phase follows this lifecycle:
+
+1. Phase created.
+2. Eligible participant field and seed order validated.
+3. Plots and any mini-group generated.
+4. Series or special-format Games generated.
+5. Schedule generated and validated.
+6. Schedule reviewed and locked.
+7. Competition played.
+8. Results verified and disputes resolved.
+9. Series and special-format standings finalized.
+10. Advancement and elimination finalized.
+11. Phase marked complete.
+12. The next stage is planned from the actual survivors.
+
+A later Phase cannot begin normal generation until the previous Phase is complete and all advancement outcomes are finalized.
+
+### Stage selection
+
+The next stage is determined by the actual eligible field and the Season's configured competition rules:
+
+- A field of four entering the terminal bracket uses semifinals, then a Final.
+- A field of two entering the terminal stage uses a Final Series.
+- A field of three entering the terminal small-field route uses a three-player round robin to select two finalists.
+- An odd field of five or more uses the mini-group plus main-field model.
+- Other eligible fields use standard Phase-and-Plot progression.
+
+The system must not rely only on an estimated Phase count such as `ceil(log₂(N)) + 1`. The estimate may assist planning, but actual Phase generation must use the finalized survivor list.
+
+If a non-final Phase produces fewer than two eligible survivors, the system must stop and report the problem. It must not silently promote a single survivor to champion.
+
+## 10. Scheduling and match windows
+
+The Series is the normal scheduling unit. Its three Games belong to one appointment, not three independently scheduled appointments.
+
+### Standard timing
+
+For a Series scheduled at time `T` in the Season's configured competition timezone:
+
+- Check-in opens at `T − 60 minutes`.
+- Check-in closes at `T − 30 minutes`.
+- The Match Window runs from `T` to `T + 60 minutes`.
+- The Results Window closes at `T + 90 minutes`.
+
+All three Games are expected to be completed within the 60-minute Match Window.
+
+### Automatic scheduling constraints
+
+- Automatic Series start times are between 10:00 and 21:00 local competition time.
+- The Match Window must finish by 22:00.
+- Sunday is excluded from automatic scheduling unless a future ruleset explicitly changes that policy.
+- A Series must not cross the daily operating boundary.
+- The configured competition timezone must be used consistently.
+- Two Series sharing a participant must never overlap.
+- Different Series may run concurrently if no participant is shared and all other scheduling constraints are satisfied.
+
+### Forward planning
+
+Before generating or locking a Phase schedule, the system must consider:
+
+- Current Phase Series count.
+- Available scheduling windows.
+- Participant conflicts.
+- Configured competition density.
+- Current Season start and end boundaries.
+- Remaining Phases and their estimated scheduling requirements.
+- The protected final-week deadline.
+
+The final Phase must fit inside the final week of the Season, including the required match and result-processing windows.
+
+If the Season cannot accommodate the remaining competition, the scheduler must block generation or lock and explain why. It must not solve infeasibility by silently compressing the schedule or scheduling outside permitted hours.
+
+### Schedule validation and lock
+
+A schedule cannot be locked if it contains a hard error such as a missing appointment, participant overlap, invalid timezone, invalid window, duplicate appointment, wrong Phase assignment, or incomplete Series schedule.
+
+Warnings about density or duration must be shown to operators. Whether a warning blocks the schedule must follow the published Season configuration.
+
+After lock, schedule changes require an authorized exception with a reason and audit record.
+
+## 11. Check-in, no-shows, forfeits, and interruptions
+
+Both participants are expected to check in during the published check-in window.
+
+The platform must record check-in status and timestamps and expose missing check-ins to authorized operators.
+
+The system must not award a forfeit merely because a participant has not checked in before the check-in window closes. The applicable no-show rule must define the decision point, evidence, operator authority, and any grace period.
+
+Once a forfeit is officially awarded, it must produce the official Game win/loss outcome required by the rules. If the ruling applies to the whole Series, the Series must receive a complete, consistent set of official outcomes before advancement is finalized.
+
+For interruptions, cancellations, voids, or rescheduling:
+
+- Preserve the original appointment and event history.
+- Record the reason and authorized actor.
+- Prevent conflicting or duplicate active appointments.
+- Do not treat a voided Game as a win, loss, or draw.
+- Reopen or replace affected Games only through the applicable authorized workflow.
+
+The exact grace period and whole-Series forfeit procedure must be fixed in the published Season rules before registration opens.
+
+## 12. Result submission, verification, and disputes
+
+A submitted result is not automatically official.
+
+The normal result workflow is:
+
+1. Game result submitted.
+2. Required evidence captured.
+3. Opponent confirmation or rejection processed.
+4. Dispute opened if required.
+5. Operator review or authorized ruling completed.
+6. Official Game result recorded.
+7. Series resolution recalculated.
+8. Advancement or elimination finalized when eligible.
+
+Every result must identify its source, submitter or ruling actor, timestamps, version, verification status, and relevant evidence references.
+
+If a result changes, the system must preserve the prior version and record the reason for the correction. Official standings and advancement must be recalculated from the corrected official results.
+
+An unresolved dispute that can affect the Phase's participant field blocks Phase completion until resolved or explicitly handled under an approved exception policy.
+
+Dispute submission and appeal deadlines must be published in the Season rules. The system must not quietly rely on an undocumented deadline.
+
+## 13. Phase completion and advancement integrity
+
+A Phase may be completed only when:
+
+- Its competition field is authoritative.
+- All required normal Series or special-format Games are accounted for.
+- Every required Game has a finalized official result.
+- All required result verifications are complete.
+- No blocking dispute remains unresolved.
+- Required penalty effects have been applied.
+- Every normal Series has a finalized advancement or elimination outcome.
+- Special-format rankings and qualifiers are finalized.
+- The advancement pool contains no duplicate participants.
+- The next-stage timing and format are feasible, if another stage is required.
+
+The system must distinguish a participant who advanced from a participant who merely remains registered or whose result is pending.
+
+The advancement pool must be generated from official outcomes only. It must not be inferred from fixture counts, UI state, or an expected number of survivors.
+
+## 14. Semifinals, Final, and champion declaration
+
+### 14.1 Semifinals
+
+The semifinal stage contains four qualified participants, arranged by approved seed order:
+
+- Seed 1 vs seed 4.
+- Seed 2 vs seed 3.
+
+Each semifinal is a standard three-Game Series. The winner of each Series advances to the Final; the loser is eliminated.
+
+Both semifinal outcomes must be finalized before the Final is generated.
+
+### 14.2 Final
+
+The Final is a standard three-Game Series between the two qualified finalists.
+
+The same Series advancement rule applies in the Final. A drawn Game does not by itself determine the champion or eliminate both finalists immediately.
+
+The Final must not start until both finalists are confirmed, the Final Series exists, its schedule is valid and locked, and all eligibility or disciplinary blockers are resolved.
+
+### 14.3 Champion declaration
+
+The system may declare a champion only when:
+
+- The official Final Series has all three finalized Game outcomes.
+- All required results are verified or covered by an authorized ruling.
+- The Series resolution identifies exactly one advancing player.
+- No blocking dispute remains.
+- The champion is one of the two official finalists.
+- The champion record is written successfully and auditably.
+- The Season's completion conditions are satisfied.
+
+Champion declaration must be idempotent and must not be based solely on a Season status change or an empty fixture list.
+
+### 14.4 Final Series with no winner
+
+Under the locked Series rule, if neither finalist earns at least two wins after all three Games—for example, a 1–1–draw or three draws—both finalists are eliminated.
+
+In that case, the system must **not invent a champion**. It must record the official Series outcome, block normal champion declaration, and escalate the Season for an authorized no-champion decision under the published rules.
+
+If NexGen requires every Season to produce a champion even when the Final Series produces no winner, a final-only contingency procedure must be explicitly approved and published before registration opens. It must not be improvised after the result is known.
+
+## 15. Season lifecycle and archival
+
+The Season lifecycle is:
+
+**DRAFT → REGISTRATION_OPEN → REGISTRATION_CLOSED → ROSTER_LOCKED → ACTIVE → PLAYOFFS → COMPLETED → ARCHIVED**
+
+The exact transition into `PLAYOFFS` must be tied to the configured terminal stage, not assumed to mean the old round-robin playoff model still governs the competition.
+
+Every transition must validate its prerequisites. A Season cannot be marked `COMPLETED` until its champion or authorized no-champion outcome is recorded, required results are finalized, and all completion blockers are cleared.
+
+Archival makes the Season historical and read-only for ordinary operations. Authorized corrections after completion or archival must preserve the previous official state and full audit history.
+
+## 16. Administration, exceptions, and audit
+
+Administrative authority is permission- and scope-based. A role alone does not grant every exception capability.
+
+Sensitive operations include:
+
+- Changing a locked roster.
+- Changing eligibility or seeding after lock.
+- Rescheduling or changing a locked Series.
+- Awarding forfeits.
+- Correcting official results.
+- Resolving disputes or applying penalties.
+- Reopening a completed Series.
+- Correcting Phase advancement.
+- Changing the champion or Season completion state.
+
+Each exception must record the actor, permission context, affected entity, prior state, new state, reason, timestamp, and relevant evidence.
+
+The system must not permit ordinary operators to bypass lifecycle guards through direct API calls. Backend authorization is authoritative; hiding a button in the frontend is not sufficient.
+
+All rules affecting competitive truth must be applied transactionally where necessary, protected against duplicate execution, and recoverable after partial failure.
+
+## 17. Ruleset governance
+
+Each Season must reference an explicit, versioned ruleset.
+
+The published ruleset must cover:
+
+- Registration and eligibility.
+- Capacity and roster locking.
+- Seeding and plot allocation.
+- Standard Series and special small-field formats.
+- Draws and advancement.
+- Scheduling, check-in, no-shows, and forfeits.
+- Results, verification, disputes, and appeals.
+- Penalties and conduct.
+- Semifinals, Final, champion declaration, and Season completion.
+- Fees, prizes, or rewards where applicable.
+
+The player-facing rules must be generated from the same authoritative ruleset used by the competition engine.
+
+A ruleset change must create a new version and follow the authorized change process. Active competition outcomes must never be silently reinterpreted by an unrecorded rule change.
+
+## 18. Launch readiness and implementation gate
+
+The competition system is not launch-ready merely because the API builds or the pages render.
+
+Before release, the team must verify the full participant journey without direct database edits or bypassing application rules:
+
+1. Create and configure a Season.
+2. Publish the applicable rules and open registration.
+3. Register eligible participants and reject invalid or duplicate registrations.
+4. Close registration, resolve capacity, review eligibility, and lock the roster.
+5. Generate the field, plots, mini-group where required, and correct Series.
+6. Generate, review, validate, and lock a feasible schedule.
+7. Execute check-in and match workflows.
+8. Submit and verify Game results.
+9. Exercise draw, forfeit, void, no-show, dispute, and authorized correction paths.
+10. Finalize each Phase and verify the actual advancement pool.
+11. Run the applicable small-field stage, semifinals, and Final.
+12. Declare a champion only under the approved conditions.
+13. Complete and archive the Season while preserving official history.
+14. Verify permissions, audit records, frontend navigation, failure messages, and recovery paths.
+
+---
+
+## 19. Policy precedence
+
+Where older documentation conflicts with this policy, the approved and versioned policy is authoritative for competition behavior. The implementation must then be corrected to match it.
+
+The following legacy assumptions must not remain active:
+
+- Single or Double Round Robin as the primary NGL Professional season format.
+- Generating every possible pairing within a Plot.
+- Eliminating both players immediately upon an individual Game draw.
+- Forcing later Phases to have fewer Plots regardless of the approved plot formula.
+- Legacy odd-field normalization in place of the five-player mini-group.
+- Fixed participant capacity of eight.
+- Fixed seven-week phases or one match per player per week.
+- Automatic champion declaration from an incomplete or non-final stage.
+
+**Target model:** a configurable, progressive competition engine that moves participants from registration through validated competition stages to an auditable champion or an explicitly recorded no-champion outcome.
