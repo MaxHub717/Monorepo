@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  UnauthorizedException,
   HttpCode,
   HttpStatus,
   Post,
@@ -115,21 +116,33 @@ export class AuthController {
     return { status: 'refreshed' };
   }
 
+ @Public()
  @HttpCode(HttpStatus.OK)
-@Post('logout')
-@UseGuards(AuthGuard, AccountStatusGuard)
-async logout(
-  @Body() body: LogoutDto,
-  @Req() request: Request,
-  @Res({ passthrough: true }) response: Response,
-) {
-  const refreshToken = body.refreshToken || request.cookies?.refreshToken;
+ @Post('logout')
+ async logout(
+   @Body() body: LogoutDto,
+   @Req() request: Request,
+   @Res({ passthrough: true }) response: Response,
+ ) {
+   const refreshToken = body.refreshToken || request.cookies?.refreshToken;
 
-  await this.authService.logout({ refreshToken });
+   try {
+     // Logout must still work when the short-lived access token has expired.
+     // The refresh token is independently verified by AuthService before its session is revoked.
+     if (refreshToken) {
+       await this.authService.logout({ refreshToken });
+     }
+   } catch (error) {
+     // An expired, revoked, or otherwise invalid refresh token should not prevent local sign-out.
+     // Unexpected failures still surface after the browser cookies are cleared.
+     if (!(error instanceof UnauthorizedException)) {
+       throw error;
+     }
+   } finally {
+     response.clearCookie('accessToken', { path: '/' });
+     response.clearCookie('refreshToken', { path: '/' });
+   }
 
-  response.clearCookie('accessToken', { path: '/' });
-  response.clearCookie('refreshToken', { path: '/' });
-
-  return { success: true };
-}
+   return { success: true };
+ }
 }
