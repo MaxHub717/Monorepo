@@ -15,6 +15,9 @@ export default function LogoutButton() {
 
     try {
       await logout();
+    } catch {
+      // Always complete the local sign-out flow. The API also clears auth cookies
+      // when the refresh token is expired or no longer valid.
     } finally {
       router.replace('/auth/login');
       router.refresh();
