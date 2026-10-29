@@ -2,9 +2,9 @@ import {
   Body,
   Controller,
   Get,
-  UnauthorizedException,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
   Post,
   Query,
   Req,
@@ -14,7 +14,6 @@ import {
 import { Request, Response } from 'express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service.js';
-import { AuthGuard, AccountStatusGuard } from '../../common/authz/authz.guards.js';
 import { Public } from '../../common/authz/authz.decorators.js';
 import { DevelopmentMailboxDto, ForgotPasswordDto, LoginDto, LogoutDto, RefreshDto, RegisterDto, ResendVerificationDto, ResetPasswordDto, VerifyEmailDto } from './dto/auth.dto.js';
 
